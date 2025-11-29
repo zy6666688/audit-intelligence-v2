@@ -151,6 +151,9 @@
 
             <!-- 操作按钮 -->
             <view class="property-actions">
+              <view class="action-btn primary" @click="showNodeEditor = true">
+                <text>✏️ 高级编辑</text>
+              </view>
               <view class="action-btn" @click="handleNodeAIAnalyze">
                 <text>🤖 AI分析</text>
               </view>
@@ -193,6 +196,14 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- 节点编辑器弹窗 -->
+    <NodeEditor
+      :visible="showNodeEditor"
+      :nodeData="selectedNode"
+      @close="showNodeEditor = false"
+      @save="handleNodeEditorSave"
+    />
   </view>
 </template>
 
@@ -200,6 +211,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import NodeCanvas from '@/components/workpaper/NodeCanvas.vue';
+import NodeEditor from '@/components/workpaper/NodeEditor.vue';
 import { autoSaveManager } from '@/utils/autoSave';
 import { aiService } from '@/services/ai';
 import { hierarchicalLayout, gridLayout, alignToGrid } from '@/utils/autoLayout';
@@ -225,6 +237,7 @@ const selectedNodeId = ref('');
 const showNodePanel = ref(true);
 const showPropertyPanel = ref(true);
 const showAddNodeModal = ref(false);
+const showNodeEditor = ref(false);
 const canvasZoom = ref(1);
 
 // 状态文本映射
@@ -619,6 +632,21 @@ watch([nodes, connections], () => {
     { immediate: false, showToast: false }
   );
 }, { deep: true });
+
+// 节点编辑器保存
+const handleNodeEditorSave = (data: any) => {
+  if (selectedNode.value) {
+    selectedNode.value.data = {
+      ...selectedNode.value.data,
+      ...data
+    };
+    
+    uni.showToast({
+      title: '内容已更新',
+      icon: 'success'
+    });
+  }
+};
 
 // 页面卸载时清理
 onUnmounted(() => {
