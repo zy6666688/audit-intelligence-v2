@@ -24,6 +24,9 @@
         <view class="tool-btn" @click="handleAIAnalyze">
           <text>🤖 AI分析</text>
         </view>
+        <view class="tool-btn" @click="showVersionHistory = true">
+          <text>📜 历史版本</text>
+        </view>
         <view class="tool-btn primary" @click="handleSave">
           <text>💾 保存</text>
         </view>
@@ -204,6 +207,14 @@
       @close="showNodeEditor = false"
       @save="handleNodeEditorSave"
     />
+
+    <!-- 历史版本管理 -->
+    <VersionHistory
+      :visible="showVersionHistory"
+      :workpaperId="workpaperId"
+      @close="showVersionHistory = false"
+      @restore="handleVersionRestore"
+    />
   </view>
 </template>
 
@@ -212,6 +223,7 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import NodeCanvas from '@/components/workpaper/NodeCanvas.vue';
 import NodeEditor from '@/components/workpaper/NodeEditor.vue';
+import VersionHistory from '@/components/workpaper/VersionHistory.vue';
 import { autoSaveManager } from '@/utils/autoSave';
 import { aiService } from '@/services/ai';
 import { hierarchicalLayout, gridLayout, alignToGrid } from '@/utils/autoLayout';
@@ -238,6 +250,7 @@ const showNodePanel = ref(true);
 const showPropertyPanel = ref(true);
 const showAddNodeModal = ref(false);
 const showNodeEditor = ref(false);
+const showVersionHistory = ref(false);
 const canvasZoom = ref(1);
 
 // 状态文本映射
@@ -643,6 +656,19 @@ const handleNodeEditorSave = (data: any) => {
     
     uni.showToast({
       title: '内容已更新',
+      icon: 'success'
+    });
+  }
+};
+
+// 版本恢复
+const handleVersionRestore = (versionData: any) => {
+  if (versionData) {
+    nodes.value = versionData.nodes || [];
+    connections.value = versionData.connections || [];
+    
+    uni.showToast({
+      title: '版本已恢复',
       icon: 'success'
     });
   }

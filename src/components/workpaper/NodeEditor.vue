@@ -60,29 +60,12 @@
 
         <!-- 文本编辑器 -->
         <view v-if="editorMode === 'text'" class="text-editor">
-          <textarea
-            class="editor-textarea"
+          <!-- 富文本编辑器 -->
+          <RichTextEditor
+            ref="richTextEditor"
             v-model="editData.content"
-            placeholder="请输入节点内容，支持多行文本..."
-            :auto-height="true"
-            :maxlength="-1"
+            placeholder="请输入节点内容，支持富文本格式..."
           />
-          
-          <!-- 格式化工具 -->
-          <view class="format-tools">
-            <view class="tool-item" @click="insertText('【重点】')">
-              <text>⭐ 重点</text>
-            </view>
-            <view class="tool-item" @click="insertText('【风险】')">
-              <text>⚠️ 风险</text>
-            </view>
-            <view class="tool-item" @click="insertText('【建议】')">
-              <text>💡 建议</text>
-            </view>
-            <view class="tool-item" @click="insertText('【结论】')">
-              <text>✅ 结论</text>
-            </view>
-          </view>
         </view>
 
         <!-- 表格编辑器 -->
@@ -181,6 +164,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import RichTextEditor from './RichTextEditor.vue';
 
 interface Props {
   visible: boolean;
@@ -235,10 +219,8 @@ watch(() => props.nodeData, (newData) => {
   }
 }, { immediate: true });
 
-// 插入文本
-const insertText = (text: string) => {
-  editData.value.content += `\n${text} `;
-};
+// 富文本编辑器引用
+const richTextEditor = ref<any>(null);
 
 // 表格操作
 const addTableRow = () => {
@@ -507,41 +489,7 @@ const handleClose = () => {
 }
 
 .text-editor {
-  .editor-textarea {
-    width: 100%;
-    min-height: 300px;
-    padding: 15px;
-    background: #1e1e1e;
-    border: 1px solid #3d3d3d;
-    border-radius: 6px;
-    color: #e0e0e0;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .format-tools {
-    margin-top: 15px;
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .tool-item {
-    padding: 6px 12px;
-    background: #3d3d3d;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s;
-
-    &:hover {
-      background: #1890ff;
-    }
-
-    text {
-      color: #e0e0e0;
-      font-size: 12px;
-    }
-  }
+  padding: 0;
 }
 
 .table-editor {

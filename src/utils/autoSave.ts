@@ -16,6 +16,12 @@ interface SaveData {
   };
 }
 
+interface VersionData extends SaveData {
+  id: string;
+  timestamp: number;
+  data: SaveData;
+}
+
 interface SaveOptions {
   immediate?: boolean;  // 是否立即保存
   showToast?: boolean;  // 是否显示提示
@@ -163,16 +169,26 @@ class AutoSaveManager {
       const versionsKey = `workpaper_versions_${workpaperId}`;
       
       // 获取现有版本列表
-      let versions: SaveData[] = [];
+      let versions: VersionData[] = [];
       try {
         const stored = await PlatformAdapter.getStorage(versionsKey);
-        versions = (stored as SaveData[]) || [];
+        versions = (stored as VersionData[]) || [];
       } catch (e) {
         versions = [];
       }
 
+      // 创建新版本对象
+      const newVersion: VersionData = {
+        id: `version_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+        data: data,
+        nodes: data.nodes,
+        connections: data.connections,
+        metadata: data.metadata
+      };
+
       // 添加新版本
-      versions.push(data);
+      versions.push(newVersion);
 
       // 只保留最新的N个版本
       if (versions.length > this.maxVersions) {
@@ -189,11 +205,11 @@ class AutoSaveManager {
   /**
    * 获取历史版本列表
    */
-  public async getVersions(workpaperId: string): Promise<SaveData[]> {
+  public async getVersions(workpaperId: string): Promise<VersionData[]> {
     try {
       const versionsKey = `workpaper_versions_${workpaperId}`;
       const versions = await PlatformAdapter.getStorage(versionsKey);
-      return (versions as SaveData[]) || [];
+      return (versions as VersionData[]) || [];
     } catch (error) {
       console.error('获取版本列表失败:', error);
       return [];
@@ -205,26 +221,31 @@ class AutoSaveManager {
    */
   public async restoreVersion(
     workpaperId: string,
-    version: SaveData,
-    saveFn: (id: string, data: SaveData) => Promise<void>
-  ): Promise<void> {
+    versionId: string,
+    saveFn?: (id: string, data: SaveData) => Promise<void>
+  ): Promise<SaveData | null> {
     try {
-      // 恢复到云端
-      await saveFn(workpaperId, version);
+      // 获取版本列表
+      const versions = await this.getVersions(workpaperId);
+      const version = versions.find(v => v.id === versionId);
+      
+      if (!version) {
+        throw new Error('版本不存在');
+      }
+
+      const versionData = version.data;
+
+      // 如果提供了保存函数，恢复到云端
+      if (saveFn) {
+        await saveFn(workpaperId, versionData);
+      }
 
       // 恢复到本地
-      await this.saveToLocal(workpaperId, version);
+      await this.saveToLocal(workpaperId, versionData);
 
-      uni.showToast({
-        title: '版本恢复成功',
-        icon: 'success'
-      });
+      return versionData;
     } catch (error) {
       console.error('版本恢复失败:', error);
-      uni.showToast({
-        title: '版本恢复失败',
-        icon: 'error'
-      });
       throw error;
     }
   }
@@ -248,6 +269,27 @@ class AutoSaveManager {
       await PlatformAdapter.removeStorage(`workpaper_versions_${workpaperId}`);
     } catch (error) {
       console.error('清除缓存失败:', error);
+    }
+  }
+
+  /**
+   * 清除所有历史版本（保留当前版本）
+   */
+  public async clearAllVersions(workpaperId: string): Promise<void> {
+    try {
+      const versionsKey = `workpaper_versions_${workpaperId}`;
+      
+      // 获取版本列表
+      const versions = await this.getVersions(workpaperId);
+      
+      if (versions.length > 0) {
+        // 只保留最新的版本
+        const latestVersion = versions[versions.length - 1];
+        await PlatformAdapter.setStorage(versionsKey, [latestVersion]);
+      }
+    } catch (error) {
+      console.error('清除历史版本失败:', error);
+      throw error;
     }
   }
 }
