@@ -6,7 +6,7 @@
 import { ref } from 'vue';
 import { PlatformAdapter } from './platform';
 
-interface SaveData {
+export interface SaveData {
   nodes: any[];
   connections: any[];
   metadata: {
@@ -16,7 +16,7 @@ interface SaveData {
   };
 }
 
-interface VersionData extends SaveData {
+export interface VersionData extends SaveData {
   id: string;
   timestamp: number;
   data: SaveData;

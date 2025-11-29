@@ -32,7 +32,7 @@
               <view class="version-info">
                 <text class="version-number">版本 #{{ versions.length - index }}</text>
                 <text class="version-badge" v-if="index === 0">当前版本</text>
-                <text class="version-badge auto" v-if="version.autoSaved">自动保存</text>
+                <text class="version-badge auto" v-if="version.metadata?.autoSaved">自动保存</text>
               </view>
               <text class="version-time">{{ formatTime(version.timestamp) }}</text>
             </view>
@@ -86,7 +86,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { autoSaveManager } from '@/utils/autoSave';
+import { autoSaveManager, type VersionData } from '@/utils/autoSave';
 
 interface Props {
   visible: boolean;
@@ -97,7 +97,7 @@ const props = defineProps<Props>();
 const emit = defineEmits(['close', 'restore']);
 
 // 版本列表
-const versions = ref<any[]>([]);
+const versions = ref<VersionData[]>([]);
 
 // 监听显示状态，加载版本
 watch(() => props.visible, (newVal) => {
@@ -172,7 +172,7 @@ const handleRestore = (version: any) => {
           uni.showLoading({ title: '正在恢复...' });
           
           // 恢复版本
-          await autoSaveManager.restoreVersion(props.workpaperId, version.id);
+          await autoSaveManager.restoreVersion(props.workpaperId, version.id, undefined);
           
           uni.hideLoading();
           uni.showToast({
