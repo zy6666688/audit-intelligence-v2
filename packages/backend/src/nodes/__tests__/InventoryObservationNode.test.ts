@@ -1,75 +1,84 @@
 /**
- * 应收账款函证节点测试
+ * 存货监盘节点测试
  * 
- * @description 测试应收账款函证节点的所有功能
+ * @description 测试存货监盘节点的所有功能
  * @author SHENJI Team
  * @date 2025-12-04
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AccountsReceivableConfirmationNode } from '../AccountsReceivableConfirmationNode';
+import { InventoryObservationNode } from '../InventoryObservationNode';
 
-describe('AccountsReceivableConfirmationNode', () => {
-  let node: AccountsReceivableConfirmationNode;
+describe('InventoryObservationNode', () => {
+  let node: InventoryObservationNode;
 
   beforeEach(() => {
-    node = new AccountsReceivableConfirmationNode();
+    node = new InventoryObservationNode();
   });
 
   describe('元数据测试', () => {
     it('应该有正确的节点ID', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.id).toBe('accounts-receivable-confirmation');
+      expect(InventoryObservationNode.metadata.id).toBe('inventory-observation');
     });
 
     it('应该有正确的节点名称', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.name).toBe('应收账款函证');
+      expect(InventoryObservationNode.metadata.name).toBe('存货监盘');
     });
 
-    it('应该属于收入循环分类', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.category).toBe('收入循环');
+    it('应该属于存货循环分类', () => {
+      expect(InventoryObservationNode.metadata.category).toBe('存货循环');
     });
 
     it('应该有描述信息', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.description).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.metadata.description.length).toBeGreaterThan(0);
+      expect(InventoryObservationNode.metadata.description).toBeDefined();
+      expect(InventoryObservationNode.metadata.description.length).toBeGreaterThan(0);
     });
 
     it('应该有版本号', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.version).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.metadata.version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(InventoryObservationNode.metadata.version).toBeDefined();
+      expect(InventoryObservationNode.metadata.version).toMatch(/^\d+\.\d+\.\d+$/);
     });
   });
 
   describe('输入定义测试', () => {
-    it('应该定义receivableList输入', () => {
-      const receivableInput = AccountsReceivableConfirmationNode.inputs.find(
-        input => input.name === 'receivableList'
+    it('应该定义inventoryBook输入', () => {
+      const inventoryInput = InventoryObservationNode.inputs.find(
+        input => input.name === 'inventoryBook'
       );
-      expect(receivableInput).toBeDefined();
-      expect(receivableInput?.type).toBe('excel');
-      expect(receivableInput?.required).toBe(true);
+      expect(inventoryInput).toBeDefined();
+      expect(inventoryInput?.type).toBe('excel');
+      expect(inventoryInput?.required).toBe(true);
     });
 
-    it('应该定义customerList输入', () => {
-      const customerInput = AccountsReceivableConfirmationNode.inputs.find(
-        input => input.name === 'customerList'
+    it('应该定义countRecords输入', () => {
+      const countInput = InventoryObservationNode.inputs.find(
+        input => input.name === 'countRecords'
       );
-      expect(customerInput).toBeDefined();
-      expect(customerInput?.type).toBe('excel');
-      expect(customerInput?.required).toBe(true);
+      expect(countInput).toBeDefined();
+      expect(countInput?.type).toBe('excel');
+      expect(countInput?.required).toBe(true);
     });
 
-    it('应该定义responseRecords输入', () => {
-      const responseInput = AccountsReceivableConfirmationNode.inputs.find(
-        input => input.name === 'responseRecords'
+    it('应该定义warehouseLayout输入', () => {
+      const layoutInput = InventoryObservationNode.inputs.find(
+        input => input.name === 'warehouseLayout'
       );
-      expect(responseInput).toBeDefined();
-      expect(responseInput?.type).toBe('excel');
-      expect(responseInput?.required).toBe(false);
+      expect(layoutInput).toBeDefined();
+      expect(layoutInput?.type).toBe('image');
+      expect(layoutInput?.required).toBe(false);
+    });
+
+    it('应该定义inventoryPhotos输入', () => {
+      const photosInput = InventoryObservationNode.inputs.find(
+        input => input.name === 'inventoryPhotos'
+      );
+      expect(photosInput).toBeDefined();
+      expect(photosInput?.type).toBe('image');
+      expect(photosInput?.required).toBe(false);
     });
 
     it('应该有输入描述', () => {
-      AccountsReceivableConfirmationNode.inputs.forEach(input => {
+      InventoryObservationNode.inputs.forEach(input => {
         expect(input.description).toBeDefined();
         expect(input.description.length).toBeGreaterThan(0);
       });
@@ -78,23 +87,23 @@ describe('AccountsReceivableConfirmationNode', () => {
 
   describe('输出定义测试', () => {
     it('应该定义summary输出', () => {
-      const summaryOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const summaryOutput = InventoryObservationNode.outputs.find(
         output => output.name === 'summary'
       );
       expect(summaryOutput).toBeDefined();
       expect(summaryOutput?.type).toBe('data');
     });
 
-    it('应该定义confirmationList输出', () => {
-      const listOutput = AccountsReceivableConfirmationNode.outputs.find(
-        output => output.name === 'confirmationList'
+    it('应该定义countList输出', () => {
+      const listOutput = InventoryObservationNode.outputs.find(
+        output => output.name === 'countList'
       );
       expect(listOutput).toBeDefined();
       expect(listOutput?.type).toBe('excel');
     });
 
     it('应该定义differenceList输出', () => {
-      const diffOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const diffOutput = InventoryObservationNode.outputs.find(
         output => output.name === 'differenceList'
       );
       expect(diffOutput).toBeDefined();
@@ -102,7 +111,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该定义workpaper输出', () => {
-      const workpaperOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const workpaperOutput = InventoryObservationNode.outputs.find(
         output => output.name === 'workpaper'
       );
       expect(workpaperOutput).toBeDefined();
@@ -110,36 +119,36 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该有5个输出项', () => {
-      expect(AccountsReceivableConfirmationNode.outputs).toHaveLength(5);
+      expect(InventoryObservationNode.outputs).toHaveLength(5);
     });
   });
 
   describe('配置项测试', () => {
-    it('应该有confirmationRatio配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio.default).toBe(1.0);
+    it('应该有toleranceRate配置', () => {
+      expect(InventoryObservationNode.config.toleranceRate).toBeDefined();
+      expect(InventoryObservationNode.config.toleranceRate.type).toBe('number');
+      expect(InventoryObservationNode.config.toleranceRate.default).toBe(0.02);
     });
 
-    it('应该有materialityAmount配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount.default).toBe(100000);
+    it('应该有countCoverageRate配置', () => {
+      expect(InventoryObservationNode.config.countCoverageRate).toBeDefined();
+      expect(InventoryObservationNode.config.countCoverageRate.type).toBe('number');
+      expect(InventoryObservationNode.config.countCoverageRate.default).toBe(1.0);
     });
 
-    it('应该有includeElectronic配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.includeElectronic).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.includeElectronic.type).toBe('boolean');
+    it('应该有valueThreshold配置', () => {
+      expect(InventoryObservationNode.config.valueThreshold).toBeDefined();
+      expect(InventoryObservationNode.config.valueThreshold.type).toBe('number');
+      expect(InventoryObservationNode.config.valueThreshold.default).toBe(50000);
     });
 
-    it('应该有autoMatchTolerance配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance.default).toBe(10);
+    it('应该有checkCondition配置', () => {
+      expect(InventoryObservationNode.config.checkCondition).toBeDefined();
+      expect(InventoryObservationNode.config.checkCondition.type).toBe('boolean');
     });
 
     it('配置项应该有描述', () => {
-      const configs = Object.values(AccountsReceivableConfirmationNode.config);
+      const configs = Object.values(InventoryObservationNode.config);
       configs.forEach(config => {
         expect(config.description).toBeDefined();
       });
@@ -147,29 +156,29 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('输入验证测试', () => {
-    it('缺少receivableList时应该失败', async () => {
+    it('缺少inventoryBook时应该失败', async () => {
       try {
         const result = await node.execute(
-          { customerList: 'test.xlsx' },
+          { countRecords: 'test.xlsx' },
           {}
         );
         expect(result.success).toBe(false);
-        expect(result.error).toContain('应收');
+        expect(result.error).toContain('存货');
       } catch (error: any) {
-        expect(error.message).toContain('应收');
+        expect(error.message).toContain('存货');
       }
     });
 
-    it('缺少customerList时应该失败', async () => {
+    it('缺少countRecords时应该失败', async () => {
       try {
         const result = await node.execute(
-          { receivableList: 'test.xlsx' },
+          { inventoryBook: 'test.xlsx' },
           {}
         );
         expect(result.success).toBe(false);
-        expect(result.error).toContain('客户');
+        expect(result.error).toContain('盘点');
       } catch (error: any) {
-        expect(error.message).toContain('客户');
+        expect(error.message).toContain('盘点');
       }
     });
 
@@ -204,8 +213,8 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('执行过程应该记录日志', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         await node.execute(inputs, {});
       } catch (error) {
@@ -221,8 +230,8 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('日志应该包含开始标记', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         await node.execute(inputs, {});
       } catch (error) {
@@ -290,8 +299,8 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('应该接受默认配置', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);
@@ -300,14 +309,14 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('应该接受自定义confirmationRatio', async () => {
+    it('应该接受自定义toleranceRate', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          confirmationRatio: 0.8
+          toleranceRate: 0.05
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -316,14 +325,14 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('应该接受自定义materialityAmount', async () => {
+    it('应该接受自定义countCoverageRate', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          materialityAmount: 200000
+          countCoverageRate: 0.8
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -332,30 +341,14 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('应该接受includeElectronic选项', async () => {
+    it('应该接受checkCondition选项', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          includeElectronic: true
-        };
-        await node.execute(inputs, config);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
-
-    it('无效的confirmationRatio应该处理', async () => {
-      try {
-        const inputs = {
-          receivableList: [],
-          customerList: []
-        };
-        const config = {
-          confirmationRatio: 1.5
+          checkCondition: false
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -366,11 +359,11 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('边界条件测试', () => {
-    it('空应收账款列表应该能处理', async () => {
+    it('空存货明细账应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);
@@ -379,14 +372,27 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('confirmationRatio为0应该能处理', async () => {
+    it('空盘点记录应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
+        };
+        await node.execute(inputs, {});
+        expect(true).toBe(true);
+      } catch (error) {
+        expect(error).toBeDefined();
+      }
+    });
+
+    it('toleranceRate为0应该能处理', async () => {
+      try {
+        const inputs = {
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          confirmationRatio: 0
+          toleranceRate: 0
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -395,14 +401,14 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('confirmationRatio为1应该能处理', async () => {
+    it('countCoverageRate为1应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          confirmationRatio: 1.0
+          countCoverageRate: 1.0
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -411,30 +417,14 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('非常大的materialityAmount应该能处理', async () => {
+    it('非常大的valueThreshold应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         const config = {
-          materialityAmount: 999999999
-        };
-        await node.execute(inputs, config);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
-
-    it('autoMatchTolerance为0应该能处理', async () => {
-      try {
-        const inputs = {
-          receivableList: [],
-          customerList: []
-        };
-        const config = {
-          autoMatchTolerance: 0
+          valueThreshold: 999999999
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -448,8 +438,8 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('遇到错误应该优雅地失败', async () => {
       try {
         const inputs = {
-          receivableList: 'invalid-file.xlsx',
-          customerList: 'invalid-file2.xlsx'
+          inventoryBook: 'invalid-file.xlsx',
+          countRecords: 'invalid-file2.xlsx'
         };
         const result = await node.execute(inputs, {});
         expect(result.success).toBe(false);
@@ -488,12 +478,26 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('高级功能测试', () => {
-    it('应该支持可选的responseRecords输入', async () => {
+    it('应该支持可选的warehouseLayout输入', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: [],
-          responseRecords: []
+          inventoryBook: [],
+          countRecords: [],
+          warehouseLayout: []
+        };
+        await node.execute(inputs, {});
+        expect(true).toBe(true);
+      } catch (error) {
+        expect(error).toBeDefined();
+      }
+    });
+
+    it('应该支持可选的inventoryPhotos输入', async () => {
+      try {
+        const inputs = {
+          inventoryBook: [],
+          countRecords: [],
+          inventoryPhotos: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);
@@ -505,8 +509,8 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('缺少可选输入不应该失败', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          inventoryBook: [],
+          countRecords: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);

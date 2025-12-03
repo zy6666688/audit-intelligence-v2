@@ -1,66 +1,66 @@
 /**
- * 应收账款函证节点测试
+ * 银行询证节点测试
  * 
- * @description 测试应收账款函证节点的所有功能
+ * @description 测试银行询证节点的所有功能
  * @author SHENJI Team
  * @date 2025-12-04
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AccountsReceivableConfirmationNode } from '../AccountsReceivableConfirmationNode';
+import { BankConfirmationNode } from '../BankConfirmationNode';
 
-describe('AccountsReceivableConfirmationNode', () => {
-  let node: AccountsReceivableConfirmationNode;
+describe('BankConfirmationNode', () => {
+  let node: BankConfirmationNode;
 
   beforeEach(() => {
-    node = new AccountsReceivableConfirmationNode();
+    node = new BankConfirmationNode();
   });
 
   describe('元数据测试', () => {
     it('应该有正确的节点ID', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.id).toBe('accounts-receivable-confirmation');
+      expect(BankConfirmationNode.metadata.id).toBe('bank-confirmation');
     });
 
     it('应该有正确的节点名称', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.name).toBe('应收账款函证');
+      expect(BankConfirmationNode.metadata.name).toBe('银行询证');
     });
 
-    it('应该属于收入循环分类', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.category).toBe('收入循环');
+    it('应该属于货币资金循环分类', () => {
+      expect(BankConfirmationNode.metadata.category).toBe('货币资金循环');
     });
 
     it('应该有描述信息', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.description).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.metadata.description.length).toBeGreaterThan(0);
+      expect(BankConfirmationNode.metadata.description).toBeDefined();
+      expect(BankConfirmationNode.metadata.description.length).toBeGreaterThan(0);
     });
 
     it('应该有版本号', () => {
-      expect(AccountsReceivableConfirmationNode.metadata.version).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.metadata.version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(BankConfirmationNode.metadata.version).toBeDefined();
+      expect(BankConfirmationNode.metadata.version).toMatch(/^\d+\.\d+\.\d+$/);
     });
   });
 
   describe('输入定义测试', () => {
-    it('应该定义receivableList输入', () => {
-      const receivableInput = AccountsReceivableConfirmationNode.inputs.find(
-        input => input.name === 'receivableList'
+    it('应该定义bankAccountList输入', () => {
+      const bankInput = BankConfirmationNode.inputs.find(
+        input => input.name === 'bankAccountList'
       );
-      expect(receivableInput).toBeDefined();
-      expect(receivableInput?.type).toBe('excel');
-      expect(receivableInput?.required).toBe(true);
+      expect(bankInput).toBeDefined();
+      expect(bankInput?.type).toBe('excel');
+      expect(bankInput?.required).toBe(true);
     });
 
-    it('应该定义customerList输入', () => {
-      const customerInput = AccountsReceivableConfirmationNode.inputs.find(
-        input => input.name === 'customerList'
+    it('应该定义balanceSheet输入', () => {
+      const balanceInput = BankConfirmationNode.inputs.find(
+        input => input.name === 'balanceSheet'
       );
-      expect(customerInput).toBeDefined();
-      expect(customerInput?.type).toBe('excel');
-      expect(customerInput?.required).toBe(true);
+      expect(balanceInput).toBeDefined();
+      expect(balanceInput?.type).toBe('excel');
+      expect(balanceInput?.required).toBe(false);
     });
 
     it('应该定义responseRecords输入', () => {
-      const responseInput = AccountsReceivableConfirmationNode.inputs.find(
+      const responseInput = BankConfirmationNode.inputs.find(
         input => input.name === 'responseRecords'
       );
       expect(responseInput).toBeDefined();
@@ -69,7 +69,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该有输入描述', () => {
-      AccountsReceivableConfirmationNode.inputs.forEach(input => {
+      BankConfirmationNode.inputs.forEach(input => {
         expect(input.description).toBeDefined();
         expect(input.description.length).toBeGreaterThan(0);
       });
@@ -78,7 +78,7 @@ describe('AccountsReceivableConfirmationNode', () => {
 
   describe('输出定义测试', () => {
     it('应该定义summary输出', () => {
-      const summaryOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const summaryOutput = BankConfirmationNode.outputs.find(
         output => output.name === 'summary'
       );
       expect(summaryOutput).toBeDefined();
@@ -86,7 +86,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该定义confirmationList输出', () => {
-      const listOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const listOutput = BankConfirmationNode.outputs.find(
         output => output.name === 'confirmationList'
       );
       expect(listOutput).toBeDefined();
@@ -94,7 +94,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该定义differenceList输出', () => {
-      const diffOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const diffOutput = BankConfirmationNode.outputs.find(
         output => output.name === 'differenceList'
       );
       expect(diffOutput).toBeDefined();
@@ -102,7 +102,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该定义workpaper输出', () => {
-      const workpaperOutput = AccountsReceivableConfirmationNode.outputs.find(
+      const workpaperOutput = BankConfirmationNode.outputs.find(
         output => output.name === 'workpaper'
       );
       expect(workpaperOutput).toBeDefined();
@@ -110,36 +110,36 @@ describe('AccountsReceivableConfirmationNode', () => {
     });
 
     it('应该有5个输出项', () => {
-      expect(AccountsReceivableConfirmationNode.outputs).toHaveLength(5);
+      expect(BankConfirmationNode.outputs).toHaveLength(5);
     });
   });
 
   describe('配置项测试', () => {
-    it('应该有confirmationRatio配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.confirmationRatio.default).toBe(1.0);
+    it('应该有confirmAllAccounts配置', () => {
+      expect(BankConfirmationNode.config.confirmAllAccounts).toBeDefined();
+      expect(BankConfirmationNode.config.confirmAllAccounts.type).toBe('boolean');
+      expect(BankConfirmationNode.config.confirmAllAccounts.default).toBe(true);
     });
 
     it('应该有materialityAmount配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.materialityAmount.default).toBe(100000);
+      expect(BankConfirmationNode.config.materialityAmount).toBeDefined();
+      expect(BankConfirmationNode.config.materialityAmount.type).toBe('number');
+      expect(BankConfirmationNode.config.materialityAmount.default).toBe(50000);
     });
 
-    it('应该有includeElectronic配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.includeElectronic).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.includeElectronic.type).toBe('boolean');
+    it('应该有includeZeroBalance配置', () => {
+      expect(BankConfirmationNode.config.includeZeroBalance).toBeDefined();
+      expect(BankConfirmationNode.config.includeZeroBalance.type).toBe('boolean');
     });
 
     it('应该有autoMatchTolerance配置', () => {
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance).toBeDefined();
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance.type).toBe('number');
-      expect(AccountsReceivableConfirmationNode.config.autoMatchTolerance.default).toBe(10);
+      expect(BankConfirmationNode.config.autoMatchTolerance).toBeDefined();
+      expect(BankConfirmationNode.config.autoMatchTolerance.type).toBe('number');
+      expect(BankConfirmationNode.config.autoMatchTolerance.default).toBe(1);
     });
 
     it('配置项应该有描述', () => {
-      const configs = Object.values(AccountsReceivableConfirmationNode.config);
+      const configs = Object.values(BankConfirmationNode.config);
       configs.forEach(config => {
         expect(config.description).toBeDefined();
       });
@@ -147,29 +147,13 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('输入验证测试', () => {
-    it('缺少receivableList时应该失败', async () => {
+    it('缺少bankAccountList时应该失败', async () => {
       try {
-        const result = await node.execute(
-          { customerList: 'test.xlsx' },
-          {}
-        );
+        const result = await node.execute({}, {});
         expect(result.success).toBe(false);
-        expect(result.error).toContain('应收');
+        expect(result.error).toContain('银行');
       } catch (error: any) {
-        expect(error.message).toContain('应收');
-      }
-    });
-
-    it('缺少customerList时应该失败', async () => {
-      try {
-        const result = await node.execute(
-          { receivableList: 'test.xlsx' },
-          {}
-        );
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('客户');
-      } catch (error: any) {
-        expect(error.message).toContain('客户');
+        expect(error.message).toContain('银行');
       }
     });
 
@@ -204,8 +188,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('执行过程应该记录日志', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         await node.execute(inputs, {});
       } catch (error) {
@@ -221,8 +204,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('日志应该包含开始标记', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         await node.execute(inputs, {});
       } catch (error) {
@@ -290,8 +272,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('应该接受默认配置', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);
@@ -300,14 +281,13 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('应该接受自定义confirmationRatio', async () => {
+    it('应该接受自定义confirmAllAccounts', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         const config = {
-          confirmationRatio: 0.8
+          confirmAllAccounts: false
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -319,11 +299,10 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('应该接受自定义materialityAmount', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         const config = {
-          materialityAmount: 200000
+          materialityAmount: 100000
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -332,30 +311,13 @@ describe('AccountsReceivableConfirmationNode', () => {
       }
     });
 
-    it('应该接受includeElectronic选项', async () => {
+    it('应该接受includeZeroBalance选项', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         const config = {
-          includeElectronic: true
-        };
-        await node.execute(inputs, config);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
-
-    it('无效的confirmationRatio应该处理', async () => {
-      try {
-        const inputs = {
-          receivableList: [],
-          customerList: []
-        };
-        const config = {
-          confirmationRatio: 1.5
+          includeZeroBalance: false
         };
         await node.execute(inputs, config);
         expect(true).toBe(true);
@@ -366,45 +328,12 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('边界条件测试', () => {
-    it('空应收账款列表应该能处理', async () => {
+    it('空银行账户列表应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         await node.execute(inputs, {});
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
-
-    it('confirmationRatio为0应该能处理', async () => {
-      try {
-        const inputs = {
-          receivableList: [],
-          customerList: []
-        };
-        const config = {
-          confirmationRatio: 0
-        };
-        await node.execute(inputs, config);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
-    });
-
-    it('confirmationRatio为1应该能处理', async () => {
-      try {
-        const inputs = {
-          receivableList: [],
-          customerList: []
-        };
-        const config = {
-          confirmationRatio: 1.0
-        };
-        await node.execute(inputs, config);
         expect(true).toBe(true);
       } catch (error) {
         expect(error).toBeDefined();
@@ -414,8 +343,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('非常大的materialityAmount应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         const config = {
           materialityAmount: 999999999
@@ -430,8 +358,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('autoMatchTolerance为0应该能处理', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         const config = {
           autoMatchTolerance: 0
@@ -448,8 +375,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('遇到错误应该优雅地失败', async () => {
       try {
         const inputs = {
-          receivableList: 'invalid-file.xlsx',
-          customerList: 'invalid-file2.xlsx'
+          bankAccountList: 'invalid-file.xlsx'
         };
         const result = await node.execute(inputs, {});
         expect(result.success).toBe(false);
@@ -488,11 +414,23 @@ describe('AccountsReceivableConfirmationNode', () => {
   });
 
   describe('高级功能测试', () => {
+    it('应该支持可选的balanceSheet输入', async () => {
+      try {
+        const inputs = {
+          bankAccountList: [],
+          balanceSheet: []
+        };
+        await node.execute(inputs, {});
+        expect(true).toBe(true);
+      } catch (error) {
+        expect(error).toBeDefined();
+      }
+    });
+
     it('应该支持可选的responseRecords输入', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: [],
+          bankAccountList: [],
           responseRecords: []
         };
         await node.execute(inputs, {});
@@ -505,8 +443,7 @@ describe('AccountsReceivableConfirmationNode', () => {
     it('缺少可选输入不应该失败', async () => {
       try {
         const inputs = {
-          receivableList: [],
-          customerList: []
+          bankAccountList: []
         };
         await node.execute(inputs, {});
         expect(true).toBe(true);
