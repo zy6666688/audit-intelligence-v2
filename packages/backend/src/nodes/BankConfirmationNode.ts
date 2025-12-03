@@ -633,7 +633,11 @@ export class BankConfirmationNode extends BaseNode {
     records: ConfirmationRecord[],
     differences: ConfirmationRecord[]
   ): Promise<string> {
-    const sections = [
+    const sections: Array<{
+      title: string;
+      headers: string[];
+      data: any[];
+    }> = [
       {
         title: '一、银行询证程序执行情况',
         headers: ['指标', '数量', '金额（元）', '比率'],
