@@ -1,0 +1,299 @@
+// Prisma Schema for 审计数智析
+// 生成时间: 2025-12-01
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 用户和认证
+// ============================================
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique @db.VarChar(50)
+  email        String    @unique @db.VarChar(100)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  displayName  String?   @map("display_name") @db.VarChar(100)
+  avatarUrl    String?   @map("avatar_url") @db.VarChar(500)
+  role         String    @default("user") @db.VarChar(20) // admin, auditor, user
+  status       String    @default("active") @db.VarChar(20) // active, suspended, deleted
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  // Relations
+  ownedProjects    Project[]         @relation("ProjectOwner")
+  projectMembers   ProjectMember[]
+  createdWorkflows Workflow[]        @relation("WorkflowCreator")
+  updatedWorkflows Workflow[]        @relation("WorkflowUpdater")
+  executions       ExecutionHistory[]
+  auditLogs        AuditLog[]
+  files            File[]
+  sessions         Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @db.VarChar(255)
+  userId       String   @map("user_id")
+  tokenHash    String   @map("token_hash") @db.VarChar(255)
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  lastActiveAt DateTime @map("last_active_at")
+  ipAddress    String?  @map("ip_address") @db.VarChar(50)
+  userAgent    String?  @map("user_agent") @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ============================================
+// 项目管理
+// ============================================
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String    @db.VarChar(200)
+  description String?   @db.Text
+  ownerId     String    @map("owner_id")
+  status      String    @default("active") @db.VarChar(20) // active, archived, deleted
+  startDate   DateTime? @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // 审计元数据
+  auditType    String? @map("audit_type") @db.VarChar(50) // financial, compliance, risk
+  clientName   String? @map("client_name") @db.VarChar(200)
+  auditPeriod  String? @map("audit_period") @db.VarChar(50)
+
+  // Relations
+  owner    User            @relation("ProjectOwner", fields: [ownerId], references: [id])
+  members  ProjectMember[]
+  workflows Workflow[]
+  files    File[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  role      String   @db.VarChar(20) // owner, editor, viewer
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+// ============================================
+// 工作流
+// ============================================
+
+model Workflow {
+  id          String   @id @default(uuid())
+  projectId   String?  @map("project_id")
+  name        String   @db.VarChar(200)
+  description String?  @db.Text
+  category    String?  @db.VarChar(50) // audit, finance, risk
+
+  // 工作流定义 (JSON)
+  nodes    Json
+  edges    Json
+  viewport Json?
+
+  // 元数据
+  createdBy String   @map("created_by")
+  updatedBy String?  @map("updated_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // 统计
+  executionCount   Int      @default(0) @map("execution_count")
+  avgExecutionTime Decimal? @map("avg_execution_time") @db.Decimal(10, 2)
+  lastExecutedAt   DateTime? @map("last_executed_at")
+
+  // 版本控制
+  version     Int     @default(1)
+  isTemplate  Boolean @default(false) @map("is_template")
+  isPublished Boolean @default(false) @map("is_published")
+
+  // Relations
+  project    Project?           @relation(fields: [projectId], references: [id])
+  creator    User               @relation("WorkflowCreator", fields: [createdBy], references: [id])
+  updater    User?              @relation("WorkflowUpdater", fields: [updatedBy], references: [id])
+  executions ExecutionHistory[]
+  files      File[]
+
+  @@index([projectId])
+  @@index([createdBy])
+  @@index([isTemplate])
+  @@map("workflows")
+}
+
+// ============================================
+// 执行历史
+// ============================================
+
+model ExecutionHistory {
+  id         String   @id @default(uuid())
+  workflowId String   @map("workflow_id")
+  taskId     String   @unique @db.VarChar(100)
+
+  // 执行状态
+  status   String  @db.VarChar(20) // pending, running, completed, failed, cancelled
+  progress Decimal @default(0) @db.Decimal(5, 2)
+
+  // 时间
+  createdAt   DateTime  @default(now()) @map("created_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  duration    Decimal?  @db.Decimal(10, 2) // 秒
+
+  // 执行结果 (JSON)
+  nodeResults Json?  @map("node_results")
+  finalOutput Json?  @map("final_output")
+  errorMessage String? @map("error_message") @db.Text
+
+  // 执行者
+  executedBy String @map("executed_by")
+
+  // 执行参数 (JSON)
+  inputParams Json? @map("input_params")
+
+  // 统计
+  nodesTotal     Int @default(0) @map("nodes_total")
+  nodesCompleted Int @default(0) @map("nodes_completed")
+  nodesFailed    Int @default(0) @map("nodes_failed")
+
+  // Relations
+  workflow  Workflow             @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  executor  User                 @relation(fields: [executedBy], references: [id])
+  nodeLogs  NodeExecutionLog[]
+
+  @@index([workflowId])
+  @@index([executedBy])
+  @@index([status, createdAt])
+  @@map("execution_history")
+}
+
+model NodeExecutionLog {
+  id          String   @id @default(uuid())
+  executionId String   @map("execution_id")
+  nodeId      String   @db.VarChar(100)
+  nodeType    String   @db.VarChar(100)
+
+  // 状态
+  status String @db.VarChar(20)
+
+  // 时间
+  startedAt   DateTime  @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  duration    Decimal?  @db.Decimal(10, 2)
+
+  // 数据 (JSON)
+  input  Json?
+  output Json?
+  error  String? @db.Text
+
+  // 性能指标
+  memoryUsed BigInt?  @map("memory_used") // bytes
+  cpuTime    Decimal? @map("cpu_time") @db.Decimal(10, 2) // seconds
+
+  // Relations
+  execution ExecutionHistory @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+  @@index([status])
+  @@map("node_execution_logs")
+}
+
+// ============================================
+// 审计日志
+// ============================================
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?  @map("user_id")
+
+  // 操作信息
+  action       String @db.VarChar(50) // create, update, delete, execute, login
+  resourceType String @map("resource_type") @db.VarChar(50) // workflow, project, user
+  resourceId   String? @map("resource_id") @db.VarChar(100)
+
+  // 详情 (JSON)
+  details    Json?
+  ipAddress  String? @map("ip_address") @db.VarChar(50)
+  userAgent  String? @map("user_agent") @db.Text
+
+  // 时间
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// 文件管理
+// ============================================
+
+model File {
+  id         String  @id @default(uuid())
+  projectId  String? @map("project_id")
+  workflowId String? @map("workflow_id")
+
+  // 文件信息
+  filename     String  @db.VarChar(500)
+  originalName String  @map("original_name") @db.VarChar(500)
+  mimeType     String  @map("mime_type") @db.VarChar(100)
+  size         BigInt  // bytes
+  category     String? @db.VarChar(50) // image, document, other
+  description  String? @db.Text
+
+  // 存储
+  storagePath String @map("storage_path") @db.VarChar(1000)
+  storageType String @default("local") @map("storage_type") @db.VarChar(20) // local, s3, oss
+  url         String @db.VarChar(1000)
+
+  // OCR结果 (JSON)
+  ocrResult Json?   @map("ocr_result")
+  ocrStatus String? @map("ocr_status") @db.VarChar(20) // pending, processing, completed, failed
+
+  // 元数据
+  uploadedBy String   @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project  Project?  @relation(fields: [projectId], references: [id])
+  workflow Workflow? @relation(fields: [workflowId], references: [id])
+  uploader User      @relation(fields: [uploadedBy], references: [id])
+
+  @@index([projectId])
+  @@index([workflowId])
+  @@index([uploadedBy])
+  @@index([category])
+  @@map("files")
+}

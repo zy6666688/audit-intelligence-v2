@@ -16,7 +16,7 @@ export const useProjectStore = defineStore('project', () => {
   async function fetchProjects(params?: any) {
     try {
       loading.value = true;
-      const data = await projectApi.getProjectList(params);
+      const data = await projectApi.getProjectList(params) as any;
       projects.value = data.list || data;
       return data;
     } catch (error) {
@@ -70,13 +70,13 @@ export const useProjectStore = defineStore('project', () => {
       
       // 更新列表中的项目
       const index = projects.value.findIndex(p => p.id === id);
-      if (index !== -1) {
-        projects.value[index] = { ...projects.value[index], ...result };
+      if (index !== -1 && result) {
+        projects.value[index] = { ...projects.value[index], ...(result as any) };
       }
       
       // 更新当前项目
-      if (currentProject.value?.id === id) {
-        currentProject.value = { ...currentProject.value, ...result };
+      if (currentProject.value?.id === id && result) {
+        currentProject.value = { ...currentProject.value, ...(result as any) };
       }
       
       return result;

@@ -14,9 +14,10 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@audit/shared": ["packages/shared/src"]
     },
-    "types": ["@dcloudio/types"],
+    "types": ["@dcloudio/types", "@types/node", "vite/client"],
     "noEmit": true,
     "isolatedModules": true
   },
@@ -24,7 +25,8 @@
     "src/**/*.ts",
     "src/**/*.d.ts",
     "src/**/*.tsx",
-    "src/**/*.vue"
+    "src/**/*.vue",
+    "src/types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",

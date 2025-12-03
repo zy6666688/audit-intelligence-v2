@@ -55,11 +55,12 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { PlatformAdapter } from '@/utils/platform';
+import { passwordLogin } from '@/api/auth';
 
 // 表单数据
 const form = ref({
-  username: '',
-  password: ''
+  username: 'admin@audit.com', // 默认值方便测试
+  password: 'admin123'
 });
 
 // 加载状态
@@ -110,16 +111,17 @@ async function handlePasswordLogin() {
   try {
     loading.value = true;
     
-    // TODO: 调用后端API登录
-    // const res = await loginApi.passwordLogin(form.value);
+    // 调用后端API登录
+    const res = await passwordLogin({
+      email: form.value.username,
+      password: form.value.password
+    });
+    
+    console.log('登录成功:', res);
     
     // 保存用户信息
-    await PlatformAdapter.setStorage('token', 'mock-token-123');
-    await PlatformAdapter.setStorage('userInfo', {
-      id: '1',
-      name: form.value.username,
-      avatar: '/static/default-avatar.png'
-    });
+    await PlatformAdapter.setStorage('token', res.token);
+    await PlatformAdapter.setStorage('userInfo', res.user);
     
     PlatformAdapter.showToast({ title: '登录成功', icon: 'success' });
     

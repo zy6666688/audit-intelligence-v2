@@ -108,7 +108,7 @@ export class PlatformAdapter {
   private static async wxLogin(): Promise<LoginResult> {
     try {
       // 1. 获取code
-      const loginRes = await uni.login({ provider: 'weixin' }) as any;
+      const loginRes = await uni.login({ provider: 'weixin' });
       const code = loginRes.code;
       
       // 2. 发送code到后端换取token
@@ -118,7 +118,7 @@ export class PlatformAdapter {
         data: { code }
       });
       
-      const data = res.data as any;
+      const data = res.data as { token: string; userInfo: any };
       
       // 3. 保存token
       uni.setStorageSync('token', data.token);

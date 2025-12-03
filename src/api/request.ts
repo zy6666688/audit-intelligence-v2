@@ -6,53 +6,75 @@ import { PlatformAdapter } from '@/utils/platform';
 
 // API基础配置
 const API_CONFIG = {
-  baseURL: import.meta.env.VITE_API_BASE || 'https://api.audit.example.com',
+  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:3000/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   }
 };
 
+// 请求配置接口
+interface RequestConfig {
+  baseURL?: string;
+  url: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  data?: unknown;
+  params?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
+  timeout?: number;
+  header?: Record<string, string>; // uni.request 使用 header
+}
+
+// 响应接口
+interface ApiResponse<T = unknown> {
+  success: boolean;
+  data: T;
+  message?: string;
+  error?: string;
+}
+
 // 请求拦截器
-async function requestInterceptor(config: any) {
+async function requestInterceptor(config: RequestConfig): Promise<RequestConfig> {
   // 添加Token
   const token = await PlatformAdapter.getStorage('token');
   if (token) {
-    config.headers = config.headers || {};
-    config.headers['Authorization'] = `Bearer ${token}`;
+    config.header = config.header || {};
+    config.header['Authorization'] = `Bearer ${token}`;
   }
 
   // 添加时间戳
-  config.headers['X-Request-Time'] = Date.now().toString();
+  config.header = config.header || {};
+  config.header['X-Request-Time'] = Date.now().toString();
 
   return config;
 }
 
 // 响应拦截器
-function responseInterceptor(response: any) {
-  const { code, data, message } = response.data;
-
-  // 根据业务状态码处理
-  if (code === 200 || code === 0) {
-    return data;
-  }
-
-  // 未登录
-  if (code === 401) {
+function responseInterceptor<T>(response: { data: any; statusCode?: number }): T {
+  // 检查HTTP状态码
+  if (response.statusCode === 401) {
     PlatformAdapter.removeStorage('token');
     PlatformAdapter.removeStorage('userInfo');
     uni.reLaunch({ url: '/pages/login/index' });
     throw new Error('未登录或登录已过期');
   }
 
-  // 权限不足
-  if (code === 403) {
+  if (response.statusCode === 403) {
     PlatformAdapter.showToast('权限不足', 'none');
     throw new Error('权限不足');
   }
 
-  // 其他错误
-  throw new Error(message || '请求失败');
+  // 处理后端响应格式
+  const resData = response.data as ApiResponse<T>;
+  
+  // 新的后端响应格式 {success: true/false, data, message, error}
+  if (resData.success) {
+    return resData.data;
+  }
+
+  // 失败情况
+  const message = resData.message || resData.error || '请求失败';
+  throw new Error(message);
 }
 
 // 错误处理
@@ -79,17 +101,17 @@ function handleError(error: any) {
 /**
  * 发送HTTP请求
  */
-export async function request<T = any>(options: {
+export async function request<T = unknown>(options: {
   url: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-  data?: any;
-  params?: any;
-  headers?: any;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  data?: unknown;
+  params?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
   timeout?: number;
 }): Promise<T> {
   try {
     // 构建配置
-    let config: any = {
+    let config: RequestConfig = {
       url: options.url.startsWith('http') ? options.url : API_CONFIG.baseURL + options.url,
       method: options.method || 'GET',
       data: options.data,
@@ -100,7 +122,7 @@ export async function request<T = any>(options: {
     // 处理GET请求参数
     if (options.params && config.method === 'GET') {
       const queryString = Object.keys(options.params)
-        .map(key => `${key}=${encodeURIComponent(options.params[key])}`)
+        .map(key => `${key}=${encodeURIComponent(String(options.params![key]))}`)
         .join('&');
       config.url += (config.url.includes('?') ? '&' : '?') + queryString;
     }
@@ -109,10 +131,16 @@ export async function request<T = any>(options: {
     config = await requestInterceptor(config);
 
     // 发送请求
-    const response = await uni.request(config);
+    const response = await uni.request({
+        url: config.url,
+        method: config.method,
+        data: config.data,
+        header: config.header,
+        timeout: config.timeout
+    });
 
     // 响应拦截
-    return responseInterceptor(response);
+    return responseInterceptor<T>(response);
   } catch (error) {
     handleError(error);
     throw error; // handleError会抛出错误，这行代码实际不会执行
@@ -122,28 +150,28 @@ export async function request<T = any>(options: {
 /**
  * GET请求
  */
-export function get<T = any>(url: string, params?: any, options?: any): Promise<T> {
+export function get<T = unknown>(url: string, params?: Record<string, any>, options?: any): Promise<T> {
   return request<T>({ url, method: 'GET', params, ...options });
 }
 
 /**
  * POST请求
  */
-export function post<T = any>(url: string, data?: any, options?: any): Promise<T> {
+export function post<T = unknown>(url: string, data?: unknown, options?: any): Promise<T> {
   return request<T>({ url, method: 'POST', data, ...options });
 }
 
 /**
  * PUT请求
  */
-export function put<T = any>(url: string, data?: any, options?: any): Promise<T> {
+export function put<T = unknown>(url: string, data?: unknown, options?: any): Promise<T> {
   return request<T>({ url, method: 'PUT', data, ...options });
 }
 
 /**
  * DELETE请求
  */
-export function del<T = any>(url: string, data?: any, options?: any): Promise<T> {
+export function del<T = unknown>(url: string, data?: unknown, options?: any): Promise<T> {
   return request<T>({ url, method: 'DELETE', data, ...options });
 }
 

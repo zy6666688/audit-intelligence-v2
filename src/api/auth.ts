@@ -1,8 +1,9 @@
 /**
  * 认证相关API
+ * 对接后端 /api/auth 路由
  */
 
-import { post } from './request';
+import { post, get } from './request';
 
 /**
  * 微信登录
@@ -14,8 +15,15 @@ export function wxLogin(data: { code: string }) {
 /**
  * 账号密码登录
  */
-export function passwordLogin(data: { username: string; password: string }) {
-  return post('/auth/login', data);
+export function passwordLogin(data: { email: string; password: string }) {
+  return post<{ token: string; user: any }>('/auth/login', data);
+}
+
+/**
+ * 用户注册
+ */
+export function register(data: { email: string; password: string; username: string; displayName?: string }) {
+  return post<{ token: string; user: any }>('/auth/register', data);
 }
 
 /**
@@ -40,8 +48,22 @@ export function refreshToken(data: { refreshToken: string }) {
 }
 
 /**
- * 获取用户信息
+ * 获取当前用户信息
  */
 export function getUserInfo() {
-  return post('/auth/userInfo');
+  return get<any>('/auth/me');
+}
+
+/**
+ * 修改密码
+ */
+export function changePassword(data: { oldPassword: string; newPassword: string }) {
+  return post('/auth/change-password', data);
+}
+
+/**
+ * 检查Token有效性
+ */
+export function checkToken() {
+  return get<{ valid: boolean }>('/auth/check');
 }

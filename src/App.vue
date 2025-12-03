@@ -72,7 +72,7 @@ page {
 }
 
 /* 重置样式 */
-* {
+view, scroll-view, swiper, swiper-item, cover-view, cover-image, icon, text, rich-text, progress, button, checkbox, form, input, label, picker, picker-view, radio, slider, switch, textarea, navigator, audio, camera, image, video {
   box-sizing: border-box;
 }
 

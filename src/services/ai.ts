@@ -4,6 +4,7 @@
  */
 
 import { post } from '@/api/request';
+import type { NodeInstance, EdgeBinding } from '@audit/shared';
 
 // AI分析结果接口
 export interface AIAnalysisResult {
@@ -57,6 +58,14 @@ export interface AnalysisContext {
   };
 }
 
+interface QwenResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
+
 class AIAnalysisService {
   private apiKey: string = '';
   private baseURL: string = 'https://dashscope.aliyuncs.com/api/v1';
@@ -97,8 +106,8 @@ class AIAnalysisService {
    */
   public async analyzeWorkflow(
     workpaperId: string,
-    nodes: any[],
-    connections: any[]
+    nodes: NodeInstance[],
+    connections: EdgeBinding[]
   ): Promise<WorkflowAnalysisResult> {
     try {
       // 构建工作流分析Prompt
@@ -239,16 +248,16 @@ ${evidences.map(e => `- ${e.fileName} (${e.type})`).join('\n')}
   /**
    * 构建工作流分析Prompt
    */
-  private buildWorkflowAnalysisPrompt(nodes: any[], connections: any[]): string {
+  private buildWorkflowAnalysisPrompt(nodes: NodeInstance[], connections: EdgeBinding[]): string {
     const systemPrompt = `你是一位资深的审计专家，擅长审计流程分析和整体风险评估。
 请分析整个审计工作流程，评估整体风险水平。`;
 
     const nodesSummary = nodes.map(n => 
-      `${n.id}: ${n.data.title} (${n.type}) - ${n.data.content?.substring(0, 50) || '无内容'}`
+      `${n.id}: ${(n.config as any)?.title || n.type} (${n.type})`
     ).join('\n');
 
     const flowSummary = connections.map(c => 
-      `${c.from} → ${c.to}`
+      `${c.from.nodeId} → ${c.to.nodeId}`
     ).join('\n');
 
     const userPrompt = `
@@ -324,7 +333,7 @@ ${context}
 
     try {
       // 实际调用千问API
-      const response = await post('/ai/qwen/chat', {
+      const response = await post<QwenResponse>('/ai/qwen/chat', {
         model: 'qwen-max',
         messages: [
           {

@@ -27,11 +27,11 @@ interface LayoutConfig {
 
 const DEFAULT_CONFIG: LayoutConfig = {
   nodeWidth: 260,
-  nodeHeight: 120,
-  horizontalSpacing: 150,
-  verticalSpacing: 100,
-  startX: 50,
-  startY: 50
+  nodeHeight: 180, // 增加默认高度以适应更多端口
+  horizontalSpacing: 200,
+  verticalSpacing: 120, // 增加垂直间距
+  startX: 100,
+  startY: 100
 };
 
 /**
@@ -302,7 +302,7 @@ function groupByLevel(
 }
 
 /**
- * 计算节点位置
+ * 计算节点位置（改进版，防止重叠）
  */
 function calculatePosition(
   nodeId: string,
@@ -314,12 +314,23 @@ function calculatePosition(
   const layer = layers.get(level) || [];
   const indexInLayer = layer.indexOf(nodeId);
   
-  const layerHeight = layer.length * (config.nodeHeight + config.verticalSpacing);
-  const startY = config.startY + (indexInLayer - layer.length / 2 + 0.5) * (config.nodeHeight + config.verticalSpacing);
+  // 水平位置：每层固定间距
+  const x = config.startX + level * (config.nodeWidth + config.horizontalSpacing);
+  
+  // 垂直位置：确保同一层节点均匀分布且不重叠
+  // 计算整个层的总高度
+  const totalHeight = layer.length * config.nodeHeight + (layer.length - 1) * config.verticalSpacing;
+  
+  // 从中心向两边分布
+  const centerOffset = totalHeight / 2;
+  const y = config.startY + indexInLayer * (config.nodeHeight + config.verticalSpacing) - centerOffset + totalHeight / (2 * layer.length);
+  
+  // 确保y坐标不小于最小值
+  const finalY = Math.max(config.startY, y);
   
   return {
-    x: config.startX + level * (config.nodeWidth + config.horizontalSpacing),
-    y: Math.max(config.startY, startY)
+    x,
+    y: finalY
   };
 }
 

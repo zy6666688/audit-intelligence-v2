@@ -7,7 +7,8 @@ export default defineConfig({
   
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
+      '@': resolve(__dirname, 'src'),
+      '@audit/shared': resolve(__dirname, 'packages/shared/src')
     }
   },
   

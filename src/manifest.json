@@ -57,8 +57,6 @@
       }
     },
     "requiredPrivateInfos": [
-      "chooseImage",
-      "chooseFile",
       "getLocation"
     ]
   },

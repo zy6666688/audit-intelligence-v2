@@ -15,20 +15,44 @@
       </view>
       
       <view class="toolbar-right">
+        <view class="tool-btn lang-switch" @click="toggleLanguage">
+          <text>{{ t('toolbar.langSwitch') }}</text>
+        </view>
         <view class="tool-btn" @click="handleAddNode">
-          <text>+ 添加节点</text>
+          <text>{{ t('toolbar.addNode') }}</text>
         </view>
         <view class="tool-btn" @click="handleAutoLayout">
-          <text>🔄 自动布局</text>
+          <text>{{ t('toolbar.autoLayout') }}</text>
         </view>
         <view class="tool-btn" @click="handleAIAnalyze">
-          <text>🤖 AI分析</text>
+          <text>{{ t('toolbar.aiAnalyze') }}</text>
+        </view>
+        <view class="tool-btn success" @click="handleRunWorkflow">
+          <text>{{ t('toolbar.run') }}</text>
         </view>
         <view class="tool-btn" @click="showVersionHistory = true">
-          <text>📜 历史版本</text>
+          <text>{{ t('toolbar.history') }}</text>
         </view>
         <view class="tool-btn primary" @click="handleSave">
-          <text>💾 保存</text>
+          <text>{{ t('toolbar.save') }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 未保存更改警告栏 -->
+    <view v-if="hasUnsavedChanges && unsavedNodes.length > 0" class="unsaved-warning">
+      <view class="warning-content">
+        <text class="warning-icon">⚠️</text>
+        <text class="warning-text">
+          有 {{ unsavedNodes.length }} 个节点未保存：{{ unsavedNodes.map(n => n.title).join('、') }}
+        </text>
+        <view class="warning-actions">
+          <view class="warning-btn save" @click="handleSave">
+            <text>💾 立即保存</text>
+          </view>
+          <view class="warning-btn close" @click="clearUnsavedChanges">
+            <text>✕</text>
+          </view>
         </view>
       </view>
     </view>
@@ -54,7 +78,7 @@
               @click="addNodeToCanvas(nodeType)"
             >
               <text class="node-icon">{{ nodeType.icon }}</text>
-              <text class="node-name">{{ nodeType.name }}</text>
+              <text class="node-name">{{ getNodeLabel(nodeType.type) }}</text>
             </view>
           </view>
         </scroll-view>
@@ -66,6 +90,9 @@
           :nodes="nodes"
           :connections="connections"
           :selectedNodeId="selectedNodeId"
+          :runningNodes="runningNodes"
+          :zoom="canvasZoom"
+          :lang="nodeLang"
           @node-select="handleNodeSelect"
           @node-move="handleNodeMove"
           @node-delete="handleNodeDelete"
@@ -74,20 +101,33 @@
           @canvas-click="handleCanvasClick"
         />
         
-        <!-- 缩放控制 -->
+        <!-- 缩放和视图控制 -->
         <view class="zoom-controls">
-          <view class="zoom-btn" @click="handleZoomIn">
-            <text>+</text>
+          <view class="control-group">
+            <view class="zoom-btn" @click="handleZoomIn">
+              <text>+</text>
+            </view>
+            <view class="zoom-display">
+              <text>{{ Math.round(canvasZoom * 100) }}%</text>
+            </view>
+            <view class="zoom-btn" @click="handleZoomOut">
+              <text>-</text>
+            </view>
           </view>
-          <view class="zoom-display">
-            <text>{{ Math.round(canvasZoom * 100) }}%</text>
+          <view class="control-divider"></view>
+          <view class="control-group">
+            <view class="zoom-btn" @click="handleZoomReset" :title="'重置缩放'">
+              <text>⊙</text>
+            </view>
+            <view class="zoom-btn" @click="handleResetView" :title="'重置视图'">
+              <text>🎯</text>
+            </view>
           </view>
-          <view class="zoom-btn" @click="handleZoomOut">
-            <text>-</text>
-          </view>
-          <view class="zoom-btn" @click="handleZoomReset">
-            <text>⊙</text>
-          </view>
+        </view>
+        
+        <!-- 操作提示 -->
+        <view class="canvas-hint">
+          <text>📷 中键 或 Shift+左键 移动画布 | 🎯 拖动节点 | 🖱️ 右键菜单</text>
         </view>
       </view>
 
@@ -111,11 +151,16 @@
                   class="input"
                   v-model="selectedNode.data.title"
                   placeholder="输入标题"
+                  @input="() => markNodeAsModified(selectedNode.id, selectedNode.data.title)"
                 />
               </view>
               <view class="property-item">
                 <text class="label">节点类型</text>
-                <text class="value">{{ getNodeTypeName(selectedNode.type) }}</text>
+                <text class="value">{{ getNodeLabel(selectedNode.type) }}</text>
+              </view>
+              <view class="property-item">
+                <text class="label">节点描述</text>
+                <text class="value description">{{ getNodeDesc(selectedNode.type) }}</text>
               </view>
             </view>
 
@@ -128,6 +173,7 @@
                   v-model="selectedNode.data.content"
                   placeholder="输入节点内容..."
                   :maxlength="-1"
+                  @input="() => markNodeAsModified(selectedNode.id, selectedNode.data.title || getNodeLabel(selectedNode.type))"
                 />
               </view>
             </view>
@@ -192,7 +238,7 @@
           >
             <text class="card-icon">{{ nodeType.icon }}</text>
             <view class="card-info">
-              <text class="card-title">{{ nodeType.name }}</text>
+              <text class="card-title">{{ nodeType.label }}</text>
               <text class="card-desc">{{ nodeType.description }}</text>
             </view>
           </view>
@@ -226,8 +272,12 @@ import NodeEditor from '@/components/workpaper/NodeEditor.vue';
 import VersionHistory from '@/components/workpaper/VersionHistory.vue';
 import { autoSaveManager } from '@/utils/autoSave';
 import { aiService } from '@/services/ai';
-import { hierarchicalLayout, gridLayout, alignToGrid } from '@/utils/autoLayout';
+import { hierarchicalLayout } from '@/utils/autoLayout';
 import { updateWorkpaper } from '@/api/workpaper';
+import { NODE_REGISTRY, getNodeDefinition, getNodeLabel, getNodeDesc, setNodeLang, getNodeLang, type NodeDefinition } from '@/utils/nodeRegistry';
+import { t, getLanguage, setLanguage } from '@/utils/i18n';
+import { FlowEngine } from '@/utils/flowEngine';
+import { useUnsavedChanges } from '@/composables/useUnsavedChanges';
 
 // 页面参数
 const workpaperId = ref('');
@@ -244,6 +294,7 @@ const workpaper = ref({
 const nodes = ref<any[]>([]);
 const connections = ref<any[]>([]);
 const selectedNodeId = ref('');
+const runningNodes = ref<Set<string>>(new Set()); // 追踪正在运行的节点
 
 // UI状态
 const showNodePanel = ref(true);
@@ -252,6 +303,18 @@ const showAddNodeModal = ref(false);
 const showNodeEditor = ref(false);
 const showVersionHistory = ref(false);
 const canvasZoom = ref(1);
+const nodeLang = ref<'zh' | 'en'>(getNodeLang());
+
+// 未保存更改系统
+const {
+  hasUnsavedChanges,
+  unsavedNodes,
+  markNodeAsModified,
+  clearUnsavedChanges,
+  showStrongWarning,
+  restoreUnsavedNodes,
+  clearStoredUnsavedNodes
+} = useUnsavedChanges();
 
 // 状态文本映射
 const statusText: Record<string, string> = {
@@ -261,39 +324,33 @@ const statusText: Record<string, string> = {
   approved: '已批准'
 };
 
-// 节点分类（类似ComfyUI）
-const nodeCategories = [
-  {
-    name: 'audit',
-    label: '审计节点',
-    nodes: [
-      { type: 'voucher', name: '凭证节点', icon: '📝', description: '审计凭证记录' },
-      { type: 'invoice', name: '发票节点', icon: '🧾', description: '发票审核' },
-      { type: 'contract', name: '合同节点', icon: '📄', description: '合同审核' },
-      { type: 'bank_flow', name: '银行流水', icon: '💰', description: '银行流水分析' }
-    ]
-  },
-  {
-    name: 'analysis',
-    label: '分析节点',
-    nodes: [
-      { type: 'data_analysis', name: '数据分析', icon: '📊', description: 'AI数据分析' },
-      { type: 'risk_assess', name: '风险评估', icon: '⚠️', description: '风险评估分析' },
-      { type: 'anomaly_detect', name: '异常检测', icon: '🔍', description: '异常情况检测' }
-    ]
-  },
-  {
-    name: 'output',
-    label: '输出节点',
-    nodes: [
-      { type: 'summary', name: '总结报告', icon: '📋', description: '生成审计总结' },
-      { type: 'conclusion', name: '审计结论', icon: '✅', description: '审计结论输出' }
-    ]
-  }
-];
+// 节点分类（从Registry生成）
+const nodeCategories = computed(() => {
+  const categories: Record<string, NodeDefinition[]> = {
+    input: [],
+    audit: [],
+    special: [],
+    analysis: [],
+    output: []
+  };
+  
+  Object.values(NODE_REGISTRY).forEach(node => {
+    if (categories[node.category]) {
+      categories[node.category].push(node);
+    }
+  });
+  
+  return [
+    { name: 'input', label: '输入节点', nodes: categories.input },
+    { name: 'audit', label: '审计节点', nodes: categories.audit },
+    { name: 'special', label: '专项审计', nodes: categories.special },
+    { name: 'analysis', label: '分析节点', nodes: categories.analysis },
+    { name: 'output', label: '输出节点', nodes: categories.output }
+  ];
+});
 
 const allNodeTypes = computed(() => {
-  return nodeCategories.flatMap(cat => cat.nodes);
+  return Object.values(NODE_REGISTRY);
 });
 
 const selectedNode = computed(() => {
@@ -314,75 +371,99 @@ onLoad((options: any) => {
 // 加载底稿数据
 const loadWorkpaper = async () => {
   try {
-    // TODO: 调用API加载底稿数据
-    // const data = await workpaperApi.getWorkpaperDetail(workpaperId.value);
-    
     // 临时使用示例数据
     workpaper.value = {
       id: workpaperId.value,
-      title: '审计底稿 - 收入审计',
+      title: '房地产预售资金监管审计', // 更新标题
       status: 'draft',
-      projectId: 'project-001'
+      projectId: 'project-RE-001'
     };
     
-    initDemoNodes();
+    // 尝试从本地加载缓存
+    const cachedData = await autoSaveManager.loadFromLocal(workpaperId.value);
+    if (cachedData) {
+      nodes.value = cachedData.nodes || [];
+      connections.value = cachedData.connections || [];
+    } else {
+      initDemoNodes();
+    }
+    
+    // 检查是否有未保存的节点
+    const restored = restoreUnsavedNodes();
+    if (restored.length > 0) {
+      // 显示强提示
+      setTimeout(async () => {
+        const shouldSave = await showStrongWarning();
+        if (shouldSave) {
+          // 用户选择立即保存
+          await handleSave();
+        } else {
+          // 高亮未保存的节点
+          highlightUnsavedNodes();
+        }
+      }, 500);
+    }
   } catch (error) {
     console.error('加载底稿失败:', error);
-    uni.showToast({ title: '加载失败', icon: 'none' });
+    uni.showToast({ title: t('messages.loadFailed') || '加载失败', icon: 'none' });
   }
 };
 
-// 初始化示例节点
+// 初始化示例节点 - 房地产预售资金监管审计
 const initDemoNodes = () => {
   nodes.value = [
+    // 1. 输入层
     {
-      id: 'node-1',
-      type: 'voucher',
+      id: 'node-contract',
+      type: 'contract_import',
       position: { x: 100, y: 100 },
-      data: {
-        title: '凭证录入',
-        content: '输入凭证信息...'
-      },
-      outputs: ['output-1']
+      data: { title: '预售合同导入', content: '导入2023年御景湾项目预售合同台账' }
     },
     {
-      id: 'node-2',
-      type: 'data_analysis',
-      position: { x: 400, y: 100 },
-      data: {
-        title: '数据分析',
-        content: 'AI分析凭证数据...'
-      },
-      inputs: ['input-1'],
-      outputs: ['output-2']
+      id: 'node-flow',
+      type: 'bankflow_import',
+      position: { x: 100, y: 300 },
+      data: { title: '监管户流水', content: '导入工行监管账户(6222...)全年流水' }
     },
+    
+    // 2. 专项审计层
     {
-      id: 'node-3',
-      type: 'summary',
-      position: { x: 700, y: 100 },
-      data: {
-        title: '审计结论',
-        content: '生成审计结论...'
-      },
-      inputs: ['input-2']
+      id: 'node-presale-check',
+      type: 'real_estate_presale_fund',
+      position: { x: 500, y: 200 },
+      data: { title: '资金监管检测', content: '检测重点：1.资金未入监管户 2.违规大额支取' }
+    },
+    
+    // 3. 辅助分析层
+    {
+      id: 'node-ai-risk',
+      type: 'ai_contract_risk',
+      position: { x: 500, y: 50 }, // 并行分支
+      data: { title: '合同条款审查', content: '识别霸王条款和延期交付风险' }
+    },
+
+    // 4. 输出层
+    {
+      id: 'node-heatmap',
+      type: 'risk_heatmap',
+      position: { x: 900, y: 200 },
+      data: { title: '风险热力图', content: '生成项目风险分布可视化' }
     }
   ];
   
   connections.value = [
-    {
-      id: 'conn-1',
-      from: 'node-1',
-      fromPort: 'output-1',
-      to: 'node-2',
-      toPort: 'input-1'
-    },
-    {
-      id: 'conn-2',
-      from: 'node-2',
-      fromPort: 'output-2',
-      to: 'node-3',
-      toPort: 'input-2'
-    }
+    // 合同 -> 资金监管检测
+    { id: 'c1', from: 'node-contract', fromPort: 'contract', to: 'node-presale-check', toPort: 'contract' },
+    // 流水 -> 资金监管检测
+    { id: 'c2', from: 'node-flow', fromPort: 'flow', to: 'node-presale-check', toPort: 'flow' },
+    
+    // 合同 -> AI条款审查 (并行分支)
+    { id: 'c3', from: 'node-contract', fromPort: 'contract', to: 'node-ai-risk', toPort: 'contract' },
+    
+    // 资金监管检测风险 -> 热力图
+    { id: 'c4', from: 'node-presale-check', fromPort: 'risk', to: 'node-heatmap', toPort: 'risks' },
+    // AI条款风险 -> 热力图
+    { id: 'c5', from: 'node-ai-risk', fromPort: 'risk', to: 'node-heatmap', toPort: 'risks' }
   ];
 };
 
@@ -403,10 +484,10 @@ const handleAutoLayout = () => {
     // 更新节点位置
     nodes.value = layoutNodes;
     
-    uni.showToast({ title: '自动布局完成', icon: 'success' });
+    uni.showToast({ title: t('messages.autoLayoutSuccess'), icon: 'success' });
   } catch (error) {
     console.error('自动布局失败:', error);
-    uni.showToast({ title: '自动布局失败', icon: 'error' });
+    uni.showToast({ title: t('messages.autoLayoutFailed'), icon: 'error' });
   }
 };
 
@@ -439,6 +520,53 @@ const handleAIAnalyze = async () => {
   }
 };
 
+const handleRunWorkflow = async () => {
+  try {
+    uni.showLoading({ title: t('messages.executingWorkflow') });
+    runningNodes.value.clear();
+    
+    // 构建并执行工作流
+    const engine = new FlowEngine(nodes.value, connections.value);
+    const result = await engine.execute({
+      onNodeStart: (nodeId) => {
+        runningNodes.value.add(nodeId);
+      },
+      onNodeEnd: (nodeId) => {
+        runningNodes.value.delete(nodeId);
+      }
+    });
+    
+    uni.hideLoading();
+    
+    // 格式化执行结果
+    const executedNodes = Object.keys(result).length;
+    const resultSummary = t('messages.executeSummary', executedNodes);
+    
+    // 将结果保存到节点数据中
+    nodes.value.forEach(node => {
+      if (result[node.id]) {
+        node.executionResult = result[node.id];
+      }
+    });
+    
+    uni.showModal({
+      title: t('messages.executeSuccess'),
+      content: resultSummary,
+      showCancel: false,
+      confirmText: t('common.confirm')
+    });
+  } catch (error: any) {
+    uni.hideLoading();
+    console.error('工作流执行异常:', error);
+    uni.showModal({
+      title: t('messages.executeFailed'),
+      content: error.message || t('messages.executionError'),
+      showCancel: false,
+      confirmText: t('common.confirm')
+    });
+  }
+};
+
 const handleSave = async () => {
   try {
     const saveData = {
@@ -459,6 +587,16 @@ const handleSave = async () => {
       },
       { immediate: true, showToast: true }
     );
+    
+    // 清除未保存标记
+    clearUnsavedChanges();
+    clearStoredUnsavedNodes();
+    
+    uni.showToast({ 
+      title: '✅ 保存成功', 
+      icon: 'success',
+      duration: 2000
+    });
   } catch (error) {
     console.error('保存失败:', error);
     uni.showToast({ title: '保存失败', icon: 'error' });
@@ -466,17 +604,16 @@ const handleSave = async () => {
 };
 
 // 节点操作
-const addNodeToCanvas = (nodeType: any) => {
+const addNodeToCanvas = (nodeType: NodeDefinition) => {
   const newNode = {
     id: `node-${Date.now()}`,
     type: nodeType.type,
     position: { x: 200, y: 200 },
     data: {
-      title: nodeType.name,
+      title: getNodeLabel(nodeType.type), // 使用当前语言的标签
       content: ''
     },
-    inputs: nodeType.type !== 'voucher' ? ['input-1'] : [],
-    outputs: nodeType.type !== 'summary' ? ['output-1'] : []
+    // 端口信息现在由Registry提供
   };
   
   nodes.value.push(newNode);
@@ -492,7 +629,29 @@ const handleNodeMove = (payload: { nodeId: string; position: { x: number; y: num
   const node = nodes.value.find(n => n.id === payload.nodeId);
   if (node) {
     node.position = payload.position;
+    // 标记节点已修改
+    markNodeAsModified(node.id, node.data.title || getNodeLabel(node.type));
   }
+};
+
+// 高亮未保存的节点
+const highlightUnsavedNodes = () => {
+  unsavedNodes.value.forEach(unsavedNode => {
+    const node = nodes.value.find(n => n.id === unsavedNode.id);
+    if (node) {
+      // 选中第一个未保存的节点
+      if (!selectedNodeId.value) {
+        selectedNodeId.value = node.id;
+      }
+    }
+  });
+  
+  // 显示提示
+  uni.showToast({
+    title: `有 ${unsavedNodes.value.length} 个节点未保存`,
+    icon: 'none',
+    duration: 3000
+  });
 };
 
 const handleNodeDelete = () => {
@@ -510,10 +669,18 @@ const handleNodeDelete = () => {
 };
 
 const handleConnectionCreate = (payload: any) => {
-  connections.value.push({
-    id: `conn-${Date.now()}`,
-    ...payload
-  });
+  // 检查是否已存在相同连接
+  const exists = connections.value.some(
+    conn => conn.from === payload.from && conn.fromPort === payload.fromPort &&
+            conn.to === payload.to && conn.toPort === payload.toPort
+  );
+  
+  if (!exists) {
+    connections.value.push({
+      id: `conn-${Date.now()}`,
+      ...payload
+    });
+  }
 };
 
 const handleConnectionDelete = (connectionId: string) => {
@@ -556,7 +723,7 @@ const handleNodeAIAnalyze = async () => {
     selectedNode.value.aiAnalysis = result;
     
     uni.hideLoading();
-    uni.showToast({ title: 'AI分析完成', icon: 'success' });
+    uni.showToast({ title: t('messages.aiAnalyzeSuccess'), icon: 'success' });
   } catch (error) {
     uni.hideLoading();
     console.error('节点AI分析失败:', error);
@@ -580,9 +747,40 @@ const handleZoomReset = () => {
   canvasZoom.value = 1;
 };
 
+const handleResetView = () => {
+  canvasZoom.value = 1;
+  // 触发NodeCanvas重置画布偏移
+  // 通过重新赋值nodes来触发组件更新
+  const temp = nodes.value;
+  nodes.value = [];
+  setTimeout(() => {
+    nodes.value = temp;
+  }, 0);
+  
+  uni.showToast({ 
+    title: t('messages.viewReset') || '视图已重置', 
+    icon: 'success',
+    duration: 1000
+  });
+};
+
 const getNodeTypeName = (type: string) => {
-  const node = allNodeTypes.value.find(n => n.type === type);
-  return node ? node.name : type;
+  const def = getNodeDefinition(type);
+  return def ? def.label : type;
+};
+
+// 语言切换
+const toggleLanguage = () => {
+  const newLang = nodeLang.value === 'zh' ? 'en' : 'zh';
+  nodeLang.value = newLang;
+  setNodeLang(newLang); // 这会同步更新i18n语言
+  setLanguage(newLang);
+  
+  uni.showToast({ 
+    title: t('messages.langSwitched'), 
+    icon: 'success',
+    duration: 1500
+  });
 };
 
 // 获取相关节点
@@ -761,29 +959,148 @@ onUnmounted(() => {
   
   .toolbar-right {
     display: flex;
+    align-items: center;
     gap: 10px;
   }
   
   .tool-btn {
     padding: 8px 16px;
-    background: #3d3d3d;
+    background: #2d2d2d;
+    border: 1px solid #3d3d3d;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 13px;
+    color: #e0e0e0;
     cursor: pointer;
     transition: all 0.2s;
     
     &:hover {
-      background: #4d4d4d;
+      background: #3d3d3d;
+      border-color: #555;
+    }
+    
+    &:active {
+      transform: translateY(1px);
+    }
+    
+    &.lang-switch {
+      background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+      border-color: #722ed1;
+      color: #fff;
+      font-weight: 500;
+      
+      &:hover {
+        background: linear-gradient(135deg, #9254de 0%, #722ed1 100%);
+      }
     }
     
     &.primary {
-      background: #1890ff;
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+      border-color: #1890ff;
       color: #fff;
       
       &:hover {
-        background: #40a9ff;
+        background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
       }
     }
+    
+    &.success {
+      background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+      border-color: #52c41a;
+      color: #fff;
+      
+      &:hover {
+        background: linear-gradient(135deg, #73d13d 0%, #52c41a 100%);
+      }
+    }
+  }
+}
+
+// 未保存更改警告栏
+.unsaved-warning {
+  background: linear-gradient(135deg, #ff4d4f 0%, #ff7875 100%);
+  border-bottom: 2px solid #ff4d4f;
+  animation: slideDown 0.3s ease;
+  box-shadow: 0 2px 8px rgba(255, 77, 79, 0.3);
+  
+  .warning-content {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    gap: 12px;
+  }
+  
+  .warning-icon {
+    font-size: 20px;
+    animation: pulse 2s infinite;
+  }
+  
+  .warning-text {
+    flex: 1;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  
+  .warning-actions {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .warning-btn {
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    
+    &.save {
+      background: white;
+      color: #ff4d4f;
+      
+      &:hover {
+        background: #f0f0f0;
+        transform: translateY(-1px);
+      }
+    }
+    
+    &.close {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+    }
+  }
+}
+
+@keyframes slideDown {
+  from {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    max-height: 100px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
   }
 }
 
@@ -830,6 +1147,9 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 0 15px;
   border-bottom: 1px solid #3d3d3d;
+  background: #252525;
+  position: relative;
+  z-index: 10;
   
   .panel-title {
     font-size: 14px;
@@ -855,6 +1175,26 @@ onUnmounted(() => {
 .panel-content {
   flex: 1;
   padding: 15px;
+  overflow-y: auto;
+  
+  /* 自定义滚动条样式 */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #1e1e1e;
+    border-radius: 4px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4d4d4d;
+    border-radius: 4px;
+    
+    &:hover {
+      background: #5d5d5d;
+    }
+  }
 }
 
 // 节点库
@@ -906,17 +1246,28 @@ onUnmounted(() => {
   background-size: 20px 20px;
 }
 
-// 缩放控制
+// 缩放和视图控制
 .zoom-controls {
   position: absolute;
   bottom: 20px;
   right: 20px;
   display: flex;
-  gap: 5px;
+  gap: 2px;
   background: #2d2d2d;
   border-radius: 8px;
   padding: 5px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  
+  .control-group {
+    display: flex;
+    gap: 2px;
+  }
+  
+  .control-divider {
+    width: 1px;
+    background: #3d3d3d;
+    margin: 0 5px;
+  }
   
   .zoom-btn,
   .zoom-display {
@@ -928,19 +1279,47 @@ onUnmounted(() => {
     border-radius: 6px;
     font-size: 14px;
     cursor: pointer;
+    transition: all 0.2s;
     
     &:hover {
       background: #3d3d3d;
+      transform: scale(1.05);
+    }
+    
+    &:active {
+      transform: scale(0.95);
     }
   }
   
   .zoom-display {
     font-size: 12px;
     cursor: default;
+    min-width: 50px;
     
     &:hover {
       background: transparent;
+      transform: none;
     }
+  }
+}
+
+// 画布操作提示
+.canvas-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(45, 45, 45, 0.9);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #aaa;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  
+  text {
+    white-space: nowrap;
   }
 }
 
@@ -996,6 +1375,12 @@ onUnmounted(() => {
       .value {
         color: #e0e0e0;
         font-size: 13px;
+        
+        &.description {
+          color: #aaa;
+          font-size: 12px;
+          line-height: 1.5;
+        }
       }
     }
   }

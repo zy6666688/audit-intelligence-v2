@@ -22,7 +22,7 @@
 
     <!-- 数据统计 -->
     <view class="stats">
-      <view class="stat-item" v-for="stat in stats" :key="stat.label">
+      <view class="stat-item" v-for="stat in stats" :key="stat.label" @click="handleStatClick(stat)">
         <text class="value">{{ stat.value }}</text>
         <text class="label">{{ stat.label }}</text>
       </view>
@@ -68,9 +68,9 @@ const userInfo = ref({
 
 // 快捷操作
 const quickActions = ref([
-  { id: 'new-project', title: '新建项目', icon: '📁', color: '#1890ff' },
-  { id: 'upload-evidence', title: '上传证据', icon: '📤', color: '#52c41a' },
-  { id: 'scan-invoice', title: '扫描发票', icon: '📷', color: '#faad14' },
+  { id: 'workpaper', title: '审计底稿', icon: '📋', color: '#1890ff' },
+  { id: 'new-project', title: '新建项目', icon: '📁', color: '#52c41a' },
+  { id: 'upload-evidence', title: '上传证据', icon: '📤', color: '#faad14' },
   { id: 'ai-analysis', title: 'AI分析', icon: '🤖', color: '#722ed1' }
 ]);
 
@@ -183,20 +183,26 @@ function getSyncStatusText(): string {
 // 快捷操作处理
 async function handleAction(item: any) {
   switch (item.id) {
+    case 'workpaper':
+      PlatformAdapter.navigateTo('/pages/workpaper/list');
+      break;
     case 'new-project':
       PlatformAdapter.navigateTo('/pages/project/detail?action=create');
       break;
     case 'upload-evidence':
       PlatformAdapter.navigateTo('/pages/evidence/upload');
       break;
-    case 'scan-invoice':
-      // TODO: 实现扫描功能
-      PlatformAdapter.showToast({ title: '扫描功能开发中', icon: 'none' });
-      break;
     case 'ai-analysis':
       // TODO: 实现AI分析功能
-      PlatformAdapter.showToast({ title: 'AI分析功能开发中', icon: 'none' });
+      PlatformAdapter.showToast('AI分析功能开发中', 'none');
       break;
+  }
+}
+
+// 统计数据点击处理
+function handleStatClick(stat: any) {
+  if (stat.label === '待审核底稿' || stat.label === '本月底稿') {
+    PlatformAdapter.navigateTo('/pages/workpaper/list');
   }
 }
 

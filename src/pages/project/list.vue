@@ -2,9 +2,10 @@
   <view class="page">
     <view class="search-bar">
       <input v-model="searchKeyword" placeholder="搜索项目" @confirm="handleSearch" />
+      <button class="search-btn" @click="handleSearch" size="mini">搜索</button>
     </view>
 
-    <view class="project-list">
+    <view class="project-list" v-if="!loading || projects.length > 0">
       <view 
         class="project-item" 
         v-for="project in filteredProjects" 
@@ -17,12 +18,27 @@
             {{ getStatusText(project.status) }}
           </view>
         </view>
-        <text class="project-client">{{ project.client }}</text>
+        <text class="project-desc" v-if="project.description">{{ project.description }}</text>
+        <view class="project-meta">
+          <text class="meta-item">创建人: {{ project.owner?.displayName || project.owner?.username }}</text>
+          <text class="meta-item" v-if="project._count">工作流: {{ project._count.workflows }}</text>
+        </view>
         <view class="project-footer">
-          <text class="time">{{ project.createTime }}</text>
-          <text class="progress">进度: {{ project.progress }}%</text>
+          <text class="time">{{ new Date(project.createdAt).toLocaleDateString() }}</text>
+          <text class="members" v-if="project._count">成员: {{ project._count.members }}</text>
         </view>
       </view>
+
+      <!-- 空状态 -->
+      <view class="empty" v-if="!loading && projects.length === 0">
+        <text class="empty-text">暂无项目</text>
+        <button class="empty-btn" @click="createProject">创建第一个项目</button>
+      </view>
+    </view>
+
+    <!-- 加载状态 -->
+    <view class="loading" v-if="loading && projects.length === 0">
+      <text>加载中...</text>
     </view>
 
     <view class="fab" @click="createProject">
@@ -34,16 +50,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { PlatformAdapter } from '@/utils/platform';
+import { getProjects, type Project } from '@/api/project-new';
 
 const searchKeyword = ref('');
-const projects = ref<any[]>([]);
+const projects = ref<Project[]>([]);
+const loading = ref(false);
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
 
 const filteredProjects = computed(() => {
-  if (!searchKeyword.value) return projects.value;
-  return projects.value.filter(p => 
-    p.name.includes(searchKeyword.value) || 
-    p.client.includes(searchKeyword.value)
-  );
+  return projects.value;
 });
 
 onMounted(() => {
@@ -51,38 +68,37 @@ onMounted(() => {
 });
 
 async function loadProjects() {
-  // TODO: 调用API加载项目列表
-  projects.value = [
-    {
-      id: '1',
-      name: 'ABC公司2024年审',
-      client: 'ABC科技有限公司',
-      status: 'in_progress',
-      progress: 65,
-      createTime: '2024-11-01'
-    },
-    {
-      id: '2',
-      name: 'XYZ集团专项审计',
-      client: 'XYZ集团股份有限公司',
-      status: 'review',
-      progress: 90,
-      createTime: '2024-10-15'
-    }
-  ];
+  try {
+    loading.value = true;
+    const res = await getProjects({
+      page: page.value,
+      limit: pageSize.value,
+      search: searchKeyword.value || undefined
+    });
+    
+    projects.value = res.items;
+    total.value = res.pagination?.total || 0;
+    
+    console.log('项目列表加载成功:', res);
+  } catch (error: any) {
+    console.error('加载项目列表失败:', error);
+    PlatformAdapter.showToast(error.message || '加载失败', 'none');
+  } finally {
+    loading.value = false;
+  }
 }
 
 function handleSearch() {
-  // 搜索逻辑已在 computed 中实现
+  page.value = 1; // 重置页码
+  loadProjects();
 }
 
 function getStatusText(status: string): string {
   const map: Record<string, string> = {
     draft: '草稿',
-    in_progress: '进行中',
-    review: '待审核',
-    approved: '已批准',
-    completed: '已完成'
+    active: '进行中',
+    archived: '已归档',
+    deleted: '已删除'
   };
   return map[status] || status;
 }
@@ -94,6 +110,38 @@ function goDetail(id: string) {
 function createProject() {
   PlatformAdapter.navigateTo('/pages/project/detail?action=create');
 }
+
+// 下拉刷新
+async function onPullDownRefresh() {
+  page.value = 1;
+  await loadProjects();
+  uni.stopPullDownRefresh();
+}
+
+// 上拉加载更多
+async function onReachBottom() {
+  if (projects.value.length >= total.value) {
+    return;
+  }
+  page.value++;
+  
+  try {
+    const res = await getProjects({
+      page: page.value,
+      limit: pageSize.value,
+      search: searchKeyword.value || undefined
+    });
+    projects.value = [...projects.value, ...res.items];
+  } catch (error: any) {
+    console.error('加载更多失败:', error);
+  }
+}
+
+// 暴露生命周期钩子
+defineExpose({
+  onPullDownRefresh,
+  onReachBottom
+});
 </script>
 
 <style lang="scss" scoped>
