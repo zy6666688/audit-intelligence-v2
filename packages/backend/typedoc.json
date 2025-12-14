@@ -1,0 +1,51 @@
+{
+  "entryPoints": ["src"],
+  "entryPointStrategy": "expand",
+  "out": "../../docs/api",
+  "exclude": [
+    "**/*+(index|.spec|.test).ts",
+    "**/node_modules/**"
+  ],
+  "excludePrivate": false,
+  "excludeProtected": false,
+  "excludeExternals": true,
+  "readme": "README.md",
+  "name": "SHENJI - 审计数智析 API文档",
+  "includeVersion": true,
+  "disableSources": false,
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "工具类",
+    "常量",
+    "中间件",
+    "审计节点",
+    "*"
+  ],
+  "sort": ["source-order"],
+  "kindSortOrder": [
+    "Class",
+    "Interface",
+    "Enum",
+    "Function",
+    "Variable"
+  ],
+  "plugin": [],
+  "theme": "default",
+  "hideGenerator": false,
+  "searchInComments": true,
+  "cleanOutputDir": true,
+  "visibilityFilters": {
+    "protected": true,
+    "private": false,
+    "inherited": true,
+    "external": false
+  },
+  "githubPages": false,
+  "gaID": "",
+  "gitRevision": "main",
+  "gitRemote": "origin"
+}

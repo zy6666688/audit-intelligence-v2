@@ -1,0 +1,81 @@
+// 全局SCSS变量和混入
+
+// 颜色变量
+$primary-color: #1890ff;
+$success-color: #52c41a;
+$warning-color: #faad14;
+$danger-color: #f5222d;
+$info-color: #909399;
+
+$text-color: #333333;
+$text-light: #666666;
+$text-lighter: #999999;
+
+$border-color: #e4e7ed;
+$bg-color: #f8f8f8;
+
+// 字体大小
+$font-size-xs: 20rpx;
+$font-size-sm: 24rpx;
+$font-size-base: 28rpx;
+$font-size-lg: 32rpx;
+$font-size-xl: 36rpx;
+
+// 间距
+$spacing-xs: 10rpx;
+$spacing-sm: 20rpx;
+$spacing-base: 30rpx;
+$spacing-lg: 40rpx;
+$spacing-xl: 60rpx;
+
+// 圆角
+$border-radius-sm: 4rpx;
+$border-radius-base: 8rpx;
+$border-radius-lg: 16rpx;
+
+// 阴影
+$box-shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
+$box-shadow-base: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+$box-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.15);
+
+// 混入
+@mixin clearfix {
+  &::after {
+    content: '';
+    display: table;
+    clear: both;
+  }
+}
+
+@mixin ellipsis($line: 1) {
+  @if $line == 1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  } @else {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: $line;
+    -webkit-box-orient: vertical;
+  }
+}
+
+// 响应式断点（仅H5）
+@mixin respond-to($breakpoint) {
+  /* #ifdef H5 */
+  @if $breakpoint == 'tablet' {
+    @media (min-width: 768px) {
+      @content;
+    }
+  } @else if $breakpoint == 'desktop' {
+    @media (min-width: 1024px) {
+      @content;
+    }
+  } @else if $breakpoint == 'wide' {
+    @media (min-width: 1280px) {
+      @content;
+    }
+  }
+  /* #endif */
+}

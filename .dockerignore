@@ -1,0 +1,25 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+*.md
+.vscode
+.idea
+dist
+build
+coverage
+.DS_Store
+*.log
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# 排除后端相关
+packages/backend
+packages/collaboration
+packages/shared
+
+# 保留必要的配置
+!packages/*/package.json
