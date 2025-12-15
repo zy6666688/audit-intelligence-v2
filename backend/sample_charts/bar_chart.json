@@ -1,0 +1,48 @@
+{
+  "title": {
+    "text": "Department Expenses",
+    "left": "center"
+  },
+  "tooltip": {
+    "trigger": "axis",
+    "axisPointer": {
+      "type": "shadow"
+    }
+  },
+  "legend": {
+    "show": true,
+    "top": "bottom"
+  },
+  "xAxis": {
+    "type": "category",
+    "data": [
+      "HR",
+      "IT",
+      "Marketing",
+      "Sales",
+      "Finance"
+    ],
+    "name": "Department"
+  },
+  "yAxis": {
+    "type": "value",
+    "name": "Expense"
+  },
+  "series": [
+    {
+      "name": "Expense",
+      "type": "bar",
+      "data": [
+        45000,
+        120000,
+        80000,
+        95000,
+        60000
+      ],
+      "smooth": false,
+      "emphasis": {
+        "focus": "series"
+      }
+    }
+  ]
+}

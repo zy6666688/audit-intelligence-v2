@@ -1,0 +1,50 @@
+{
+  "title": {
+    "text": "Monthly Sales Trend",
+    "left": "center"
+  },
+  "tooltip": {
+    "trigger": "axis",
+    "axisPointer": {
+      "type": "line"
+    }
+  },
+  "legend": {
+    "show": true,
+    "top": "bottom"
+  },
+  "xAxis": {
+    "type": "category",
+    "data": [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun"
+    ],
+    "name": "Month"
+  },
+  "yAxis": {
+    "type": "value",
+    "name": "Sales"
+  },
+  "series": [
+    {
+      "name": "Sales",
+      "type": "line",
+      "data": [
+        120,
+        150,
+        180,
+        170,
+        200,
+        220
+      ],
+      "smooth": true,
+      "emphasis": {
+        "focus": "series"
+      }
+    }
+  ]
+}

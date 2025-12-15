@@ -1,0 +1,47 @@
+{
+  "title": {
+    "text": "Quarterly Revenue",
+    "left": "center"
+  },
+  "tooltip": {
+    "trigger": "axis",
+    "axisPointer": {
+      "type": "line"
+    }
+  },
+  "legend": {
+    "show": true,
+    "top": "bottom"
+  },
+  "xAxis": {
+    "type": "category",
+    "data": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "name": "Quarter"
+  },
+  "yAxis": {
+    "type": "value",
+    "name": "Revenue"
+  },
+  "series": [
+    {
+      "name": "Revenue",
+      "type": "line",
+      "data": [
+        100000,
+        150000,
+        180000,
+        220000
+      ],
+      "smooth": true,
+      "emphasis": {
+        "focus": "series"
+      },
+      "areaStyle": {}
+    }
+  ]
+}

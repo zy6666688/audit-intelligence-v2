@@ -1,0 +1,76 @@
+{
+  "title": {
+    "text": "Age vs Income Correlation",
+    "left": "center"
+  },
+  "tooltip": {
+    "trigger": "item",
+    "formatter": "Age: {c[0]}<br/>Income: {c[1]}"
+  },
+  "legend": {
+    "show": true,
+    "top": "bottom"
+  },
+  "xAxis": {
+    "type": "value",
+    "name": "Age",
+    "splitLine": {
+      "lineStyle": {
+        "type": "dashed"
+      }
+    }
+  },
+  "yAxis": {
+    "type": "value",
+    "name": "Income",
+    "splitLine": {
+      "lineStyle": {
+        "type": "dashed"
+      }
+    }
+  },
+  "series": [
+    {
+      "name": "Age vs Income",
+      "type": "scatter",
+      "symbolSize": 8,
+      "data": [
+        [
+          25.0,
+          35000.0
+        ],
+        [
+          30.0,
+          45000.0
+        ],
+        [
+          35.0,
+          55000.0
+        ],
+        [
+          40.0,
+          65000.0
+        ],
+        [
+          45.0,
+          75000.0
+        ],
+        [
+          50.0,
+          80000.0
+        ],
+        [
+          55.0,
+          85000.0
+        ],
+        [
+          60.0,
+          90000.0
+        ]
+      ],
+      "emphasis": {
+        "focus": "series"
+      }
+    }
+  ]
+}

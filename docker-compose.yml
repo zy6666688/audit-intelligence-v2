@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: audit_backend
+    ports:
+      - "8000:8000"
+    environment:
+      # JWT Configuration (MUST SET IN PRODUCTION)
+      - JWT_SECRET=${JWT_SECRET:-please-change-this-secret-key-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_MINUTES=30
+      
+      # Application Settings
+      - DEBUG=false
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+      - MAX_CONCURRENT_TASKS=5
+      - DATA_RETENTION_DAYS=90
+      
+      # Storage Path
+      - STORAGE_PATH=/app/storage
+    
+    volumes:
+      # Persistent storage for databases and files
+      - ./storage:/app/storage
+      - ./backend/app:/app/app:ro  # Read-only source code
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - audit_network
+
+  # Frontend Web Service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: audit_frontend
+    ports:
+      - "80:80"
+    
+    depends_on:
+      - backend
+    
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    
+    restart: unless-stopped
+    
+    networks:
+      - audit_network
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: audit_nginx
+    ports:
+      - "443:443"
+      - "8080:80"
+    
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL certificates
+    
+    depends_on:
+      - backend
+      - frontend
+    
+    restart: unless-stopped
+    
+    networks:
+      - audit_network
+
+networks:
+  audit_network:
+    driver: bridge
+
+volumes:
+  storage_data:
+    driver: local
