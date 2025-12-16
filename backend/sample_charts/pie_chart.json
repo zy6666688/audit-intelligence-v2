@@ -1,0 +1,51 @@
+{
+  "title": {
+    "text": "Market Share Distribution",
+    "left": "center"
+  },
+  "tooltip": {
+    "trigger": "item",
+    "formatter": "{a} <br/>{b}: {c} ({d}%)"
+  },
+  "legend": {
+    "show": true,
+    "orient": "vertical",
+    "left": "left"
+  },
+  "series": [
+    {
+      "name": "Share",
+      "type": "pie",
+      "radius": "50%",
+      "data": [
+        {
+          "name": "Company A",
+          "value": 30.0
+        },
+        {
+          "name": "Company B",
+          "value": 25.0
+        },
+        {
+          "name": "Company C",
+          "value": 20.0
+        },
+        {
+          "name": "Company D",
+          "value": 15.0
+        },
+        {
+          "name": "Others",
+          "value": 10.0
+        }
+      ],
+      "emphasis": {
+        "itemStyle": {
+          "shadowBlur": 10,
+          "shadowOffsetX": 0,
+          "shadowColor": "rgba(0, 0, 0, 0.5)"
+        }
+      }
+    }
+  ]
+}

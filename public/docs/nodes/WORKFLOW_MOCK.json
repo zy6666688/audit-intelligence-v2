@@ -1,0 +1,70 @@
+{
+  "name": "audit_demo_mock",
+  "description": "示例工作流：文件→清洗→校验→可视化",
+  "nodes": [
+    {
+      "id": "file_upload_1",
+      "type": "FileUpload",
+      "outputs": { "raw_files": ["input/invoice_demo.xlsx"] }
+    },
+    {
+      "id": "excel_loader_1",
+      "type": "ExcelLoader",
+      "inputs": { "file_path": "input/invoice_demo.xlsx", "sheet_name": "Sheet1", "nrows": 5000 }
+    },
+    {
+      "id": "column_mapper_1",
+      "type": "ColumnMapperNode",
+      "inputs": {
+        "mapping_json": "{\"发票号码\":\"invoice_no\",\"金额\":\"amount\",\"日期\":\"date\"}",
+        "keep_other_columns": false,
+        "strict_mode": true,
+        "drop_duplicates": true
+      }
+    },
+    {
+      "id": "null_cleaner_1",
+      "type": "NullValueCleanerNode",
+      "inputs": { "target_columns": "amount,date", "strategy": "drop_rows", "report_limit": 20 }
+    },
+    {
+      "id": "validator_1",
+      "type": "ExcelColumnValidator",
+      "inputs": { "column_name": "amount", "min_value": 0, "max_value": 20000, "include_bounds": true, "report_limit": 20 }
+    },
+    {
+      "id": "audit_check_1",
+      "type": "AuditCheckNode",
+      "inputs": { "amount": "@validator_1.filtered_df.amount", "threshold": 10000, "include_bounds": false }
+    },
+    {
+      "id": "preview_1",
+      "type": "DataFrameToTableNode",
+      "inputs": { "dataframe": "@validator_1.filtered_df", "max_rows": 20, "include_index": false, "truncate_cols": 120 }
+    },
+    {
+      "id": "chart_1",
+      "type": "QuickPlotNode",
+      "inputs": {
+        "dataframe": "@validator_1.filtered_df",
+        "chart_type": "bar",
+        "x_column": "invoice_no",
+        "y_column": "amount",
+        "title": "异常金额分布",
+        "legend_show": true,
+        "max_points": 500,
+        "sort_by_x": false
+      }
+    }
+  ],
+  "edges": [
+    ["file_upload_1", "excel_loader_1"],
+    ["excel_loader_1", "column_mapper_1"],
+    ["column_mapper_1", "null_cleaner_1"],
+    ["null_cleaner_1", "validator_1"],
+    ["validator_1", "audit_check_1"],
+    ["validator_1", "preview_1"],
+    ["validator_1", "chart_1"]
+  ]
+}
+
