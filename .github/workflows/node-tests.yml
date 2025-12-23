@@ -1,0 +1,137 @@
+name: Node tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install backend deps if requirements exist
+        run: |
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+      - name: Validate sandbox policy
+        run: |
+          if [ -f backend/config/sandbox_policies.yml ]; then python tools/validate_sandbox_policy.py backend/config/sandbox_policies.yml || (echo 'sandbox policy validation failed' && exit 1); else echo 'no sandbox policy found'; fi
+      - name: Validate node registry
+        env:
+          REGISTRY_SUGGESTIONS_ARTIFACT_PATH: ${{ runner.temp }}/registry_suggestions.json
+        run: |
+          if [ -f backend/scripts/validate_registry.py ]; then python backend/scripts/validate_registry.py || (echo 'node registry validation failed' && exit 1); else echo 'no registry validator found'; fi
+      - name: Run backend pytest
+        working-directory: backend
+        run: |
+          if command -v pytest >/dev/null 2>&1; then STORAGE_PATH=${{ runner.temp }}/storage pytest -q || (echo 'pytest failed' && exit 1); else echo 'pytest not installed'; exit 1; fi
+      - name: Upload registry suggestions artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-suggestions
+          path: ${{ runner.temp }}/registry_suggestions.json
+      - name: Comment registry suggestions on PR
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `${process.env['RUNNER_TEMP']}/registry_suggestions.json`;
+            if (!fs.existsSync(path)) {
+              core.info('No registry suggestions artifact found; skipping comment.');
+              return;
+            }
+            let data = {};
+            try {
+              data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            } catch (e) {
+              core.info('Failed to parse registry suggestions artifact; skipping comment.');
+              return;
+            }
+            const suggestions = data.suggestions || [];
+            if (!suggestions.length) {
+              core.info('No suggestions present; nothing to comment.');
+              return;
+            }
+            // Build comment body
+            const lines = [];
+            lines.push('### Automated registry validation suggestions');
+            lines.push('');
+            suggestions.forEach(s => {
+              lines.push(`- **${s.node}**: ${s.reason}`);
+              lines.push('```suggestion');
+              lines.push(s.suggestion);
+              lines.push('```');
+              lines.push('');
+            });
+            const body = lines.join('\\n');
+            const pr_number = context.payload.pull_request && context.payload.pull_request.number;
+            if (!pr_number) {
+              core.info('No pull_request context available; skipping comment.');
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr_number,
+              body
+            });
+
+  integration-light:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install backend deps if requirements exist
+        run: |
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+      - name: Run light integration tests (Scenario 1/2)
+        working-directory: backend
+        run: |
+          # Run only Scenario 1 and Scenario 2 integration tests (if present)
+          STORAGE_PATH=${{ runner.temp }}/storage pytest -q backend/tests/integration -k "scenario_1 or scenario_2" || (echo 'integration tests failed' && exit 1)
+
+  fuzz-nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install backend deps if requirements exist
+        run: |
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+      - name: Run fuzz suite
+        working-directory: backend
+        run: |
+          # Run policy validator as a smoke check before fuzzing
+          python ../tools/validate_sandbox_policy.py backend/config/sandbox_policies.yml || (echo 'policy validation failed' && exit 1)
+          STORAGE_PATH=${{ runner.temp }}/storage python -u -m backend.tests.fuzz.run_fuzz || true
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install frontend deps (if package.json found)
+        run: |
+          if [ -f package.json ]; then npm ci; fi
+      - name: Run frontend tests (Jest)
+        run: |
+          if [ -f package.json ]; then npm test --silent || (echo 'frontend tests failed' && exit 1); else echo 'no package.json'; fi
+
+
