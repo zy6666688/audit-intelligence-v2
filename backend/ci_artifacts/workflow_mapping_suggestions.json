@@ -1,0 +1,270 @@
+{
+  "suggestions": [
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n2",
+      "node_class": "ColumnMapperNode",
+      "edge": {
+        "from": "n1",
+        "to": "n2",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n3",
+      "node_class": "NullValueCleanerNode",
+      "edge": {
+        "from": "n2",
+        "to": "n3",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n4",
+      "node_class": "CommonMetricsNode",
+      "edge": {
+        "from": "n3",
+        "to": "n4",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n5",
+      "node_class": "SceneMetricsNode",
+      "edge": {
+        "from": "n3",
+        "to": "n5",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n6",
+      "node_class": "RuleCalculationNode",
+      "edge": {
+        "from": "n4",
+        "to": "n6",
+        "from_slot": 0,
+        "to_slot": 1
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n6",
+      "node_class": "RuleCalculationNode",
+      "edge": {
+        "from": "n5",
+        "to": "n6",
+        "from_slot": 0,
+        "to_slot": 2
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n6",
+      "node_class": "RuleCalculationNode",
+      "edge": {
+        "from": "n3",
+        "to": "n6",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n7",
+      "node_class": "ExcelColumnValidator",
+      "edge": {
+        "from": "n3",
+        "to": "n7",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n8",
+      "node_class": "TextUnderstandingAI",
+      "edge": {
+        "from": "n3",
+        "to": "n8",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n9",
+      "node_class": "AnalysisReasoningAI",
+      "edge": {
+        "from": "n6",
+        "to": "n9",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n9",
+      "node_class": "AnalysisReasoningAI",
+      "edge": {
+        "from": "n4",
+        "to": "n9",
+        "from_slot": 0,
+        "to_slot": 1
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n9",
+      "node_class": "AnalysisReasoningAI",
+      "edge": {
+        "from": "n8",
+        "to": "n9",
+        "from_slot": 0,
+        "to_slot": 2
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n10",
+      "node_class": "HumanReviewNode",
+      "edge": {
+        "from": "n6",
+        "to": "n10",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n10",
+      "node_class": "HumanReviewNode",
+      "edge": {
+        "from": "n9",
+        "to": "n10",
+        "from_slot": 0,
+        "to_slot": 1
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n11",
+      "node_class": "QuickPlotNode",
+      "edge": {
+        "from": "n3",
+        "to": "n11",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n12",
+      "node_class": "DataFrameToTableNode",
+      "edge": {
+        "from": "n7",
+        "to": "n12",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n13",
+      "node_class": "ResultGenerationNode",
+      "edge": {
+        "from": "n10",
+        "to": "n13",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n13",
+      "node_class": "ResultGenerationNode",
+      "edge": {
+        "from": "n9",
+        "to": "n13",
+        "from_slot": 0,
+        "to_slot": 1
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    },
+    {
+      "workflow": "invoice_audit_workflow.json",
+      "node_id": "n14",
+      "node_class": "ExportReportNode",
+      "edge": {
+        "from": "n13",
+        "to": "n14",
+        "from_slot": 0,
+        "to_slot": 0
+      },
+      "inferred_param": null,
+      "suggested_mapping": null,
+      "reason": "No missing required inputs and unable to infer; manual review recommended"
+    }
+  ]
+}
