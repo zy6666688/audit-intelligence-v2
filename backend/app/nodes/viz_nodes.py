@@ -15,6 +15,7 @@ from typing import Tuple, Any, Dict, List, Optional
 from datetime import datetime
 
 from .base_node import BaseNode, ExecutionContext, NodeMetadata, FailurePolicy
+from app.core.config import settings
 
 class QuickPlotNode(BaseNode):
     """
@@ -220,7 +221,8 @@ class QuickPlotNode(BaseNode):
     ) -> dict:
         """Generate area chart (line chart with filled area)."""
         option = self._generate_basic_chart(df, "line", x_col, y_col, title, legend_show)
-        # Add area fill
+        # Convert series type to 'area' and add area fill
+        option["series"][0]["type"] = "area"
         option["series"][0]["areaStyle"] = {}
         return option
     
@@ -488,9 +490,69 @@ class ResultGenerationNode(BaseNode):
         return (audit_result,)
 
 
+class ReportGenerationNode(BaseNode):
+    """
+    5A-2 审计报告生成节点 - 将文本摘要转换为结构化审计报告
+    """
+    
+    NODE_TYPE = "ReportGeneration"
+    VERSION = "1.0.0"
+    CATEGORY = "audit"
+    DISPLAY_NAME = "报告生成"
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "violation_records": ("STRING", {"default": ""}),
+            },
+            "optional": {
+                "inventory_variance": ("STRING", {"default": ""}),
+                "benefit_transfer_clues": ("STRING", {"default": ""})
+            }
+        }
+    
+    RETURN_TYPES = ("DICT", "STRING")
+    RETURN_NAMES = ("audit_report", "recommendations")
+    FUNCTION = "generate_report"
+    
+    def generate_report(self, violation_records: str, inventory_variance: str = "", benefit_transfer_clues: str = ""):
+        """生成结构化审计报告"""
+        from datetime import datetime
+        
+        # 构建结构化报告
+        audit_report = {
+            "summary": {
+                "report_type": "审计报告",
+                "generation_time": datetime.now().isoformat(),
+                "violation_count": len(violation_records.split('\n')) if violation_records else 0,
+                "has_inventory_issues": bool(inventory_variance),
+                "has_benefit_transfer": bool(benefit_transfer_clues)
+            },
+            "findings": {
+                "violations": violation_records if violation_records else "无违规事项",
+                "inventory_variance": inventory_variance if inventory_variance else "无盘点差异",
+                "benefit_transfer_clues": benefit_transfer_clues if benefit_transfer_clues else "无利益输送线索"
+            },
+            "metadata": {
+                "generated_by": "ReportGenerationNode",
+                "version": "1.0.0"
+            }
+        }
+        
+        # 生成整改建议
+        recommendations = f"""整改建议：
+1. 针对违规事项：{violation_records[:100] if violation_records else '无'}
+2. 针对盘点差异：{inventory_variance[:100] if inventory_variance else '无'}
+3. 针对利益输送：{benefit_transfer_clues[:100] if benefit_transfer_clues else '无'}
+"""
+        
+        return (audit_report, recommendations)
+
+
 class ExportReportNode(BaseNode):
     """
-    5B 报告导出节点 - 生成多种格式的报告
+    5B 报告导出节点 - 生成多种格式的报告（有输出端点）
     """
     
     NODE_TYPE = "ExportReportNode"
@@ -504,12 +566,275 @@ class ExportReportNode(BaseNode):
             "required": {
                 "audit_result": ("DICT",),
                 "export_format": (["excel", "json", "html"], {"default": "excel"})
+            },
+            "optional": {
+                "save_path": ("STRING", {"default": ""}),
+                "file_name_template": ("STRING", {"default": "audit_report_{timestamp}"})
             }
         }
     
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("file_path", "status")
     FUNCTION = "export_report"
+
+
+class SaveResultNode(BaseNode):
+    """
+    结果保存节点 - 保存数据到文件（无输出端点，类似 ComfyUI 的保存图像节点）
+    """
+    
+    NODE_TYPE = "SaveResult"
+    VERSION = "1.0.0"
+    CATEGORY = "output"
+    DISPLAY_NAME = "保存结果"
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "data": ("*",),  # 接受任何类型
+                "file_name": ("STRING", {"default": "result_{timestamp}"}),
+            },
+            "optional": {
+                "save_path": ("STRING", {"default": ""}),
+                "format": (["json", "excel", "csv", "txt"], {"default": "json"}),
+                "auto_open": ("BOOLEAN", {"default": False})
+            }
+        }
+    
+    RETURN_TYPES = ("DICT",)  # 返回结果信息用于节点内显示
+    RETURN_NAMES = ("result_info",)
+    FUNCTION = "save_result"
+    
+    def save_result(self, data, file_name: str, save_path: str = "", format: str = "json", auto_open: bool = False):
+        """保存数据到文件"""
+        import os
+        import json
+        import pandas as pd
+        from datetime import datetime
+        
+        # 解析文件名模板
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        date_str = datetime.now().strftime("%Y%m%d")
+        time_str = datetime.now().strftime("%H%M%S")
+        
+        final_file_name = file_name.replace("{timestamp}", timestamp).replace("{date}", date_str).replace("{time}", time_str)
+        
+        # 确定保存路径
+        if save_path:
+            export_dir = os.path.join(settings.STORAGE_PATH, save_path)
+        else:
+            export_dir = os.path.join(settings.STORAGE_PATH, "output", "results")
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # 根据格式保存
+        if format == "json":
+            file_path = os.path.join(export_dir, f"{final_file_name}.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        elif format == "excel":
+            file_path = os.path.join(export_dir, f"{final_file_name}.xlsx")
+            if isinstance(data, dict):
+                with pd.ExcelWriter(file_path) as writer:
+                    for sheet_name, sheet_data in data.items():
+                        if isinstance(sheet_data, (list, dict)):
+                            df = pd.DataFrame(sheet_data) if isinstance(sheet_data, list) else pd.DataFrame([sheet_data])
+                            df.to_excel(writer, sheet_name=str(sheet_name), index=False)
+                        else:
+                            pd.DataFrame([{"value": sheet_data}]).to_excel(writer, sheet_name=str(sheet_name), index=False)
+            elif isinstance(data, pd.DataFrame):
+                data.to_excel(file_path, index=False)
+            else:
+                pd.DataFrame([{"value": data}]).to_excel(file_path, index=False)
+        elif format == "csv":
+            file_path = os.path.join(export_dir, f"{final_file_name}.csv")
+            if isinstance(data, pd.DataFrame):
+                data.to_csv(file_path, index=False, encoding="utf-8-sig")
+            else:
+                pd.DataFrame([{"value": data}]).to_csv(file_path, index=False, encoding="utf-8-sig")
+        else:  # txt
+            file_path = os.path.join(export_dir, f"{final_file_name}.txt")
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(str(data))
+        
+        status = f"已保存为 {format.upper()} 格式"
+        
+        # 返回结果信息（用于节点内显示）
+        result_info = {
+            "file_path": file_path,
+            "status": status,
+            "format": format,
+            "saved_at": datetime.now().isoformat(),
+            "file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0
+        }
+        return (result_info,)
+
+
+class PreviewResultNode(BaseNode):
+    """
+    预览结果节点 - 在节点内显示数据预览（无输出端点）
+    """
+    
+    NODE_TYPE = "PreviewResult"
+    VERSION = "1.0.0"
+    CATEGORY = "output"
+    DISPLAY_NAME = "预览结果"
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "data": ("*",),  # 接受任何类型
+            },
+            "optional": {
+                "preview_type": (["table", "json", "text", "chart"], {"default": "table"}),
+                "max_rows": ("INT", {"default": 50, "min": 1, "max": 1000})
+            }
+        }
+    
+    RETURN_TYPES = ("DICT",)  # 返回预览数据用于节点内显示
+    RETURN_NAMES = ("preview_data",)
+    FUNCTION = "preview_result"
+    
+    def preview_result(self, data, preview_type: str = "table", max_rows: int = 50):
+        """生成预览数据"""
+        import json
+        import pandas as pd
+        
+        preview_data = {
+            "preview_type": preview_type,
+            "data_type": type(data).__name__,
+            "preview": ""
+        }
+        
+        if preview_type == "table":
+            if isinstance(data, pd.DataFrame):
+                preview_data["preview"] = data.head(max_rows).to_dict('records')
+                preview_data["total_rows"] = len(data)
+                preview_data["columns"] = list(data.columns)
+            elif isinstance(data, (list, dict)):
+                df = pd.DataFrame(data) if isinstance(data, list) else pd.DataFrame([data])
+                preview_data["preview"] = df.head(max_rows).to_dict('records')
+                preview_data["total_rows"] = len(df)
+                preview_data["columns"] = list(df.columns)
+            else:
+                preview_data["preview"] = str(data)
+        elif preview_type == "json":
+            preview_data["preview"] = json.dumps(data, ensure_ascii=False, indent=2) if not isinstance(data, str) else data
+        elif preview_type == "text":
+            preview_data["preview"] = str(data)
+        else:  # chart
+            preview_data["preview"] = "图表预览需要数据框格式"
+        
+        return (preview_data,)
+
+
+class ExportReportResultNode(BaseNode):
+    """
+    导出报告结果节点 - 导出报告并在节点内显示（无输出端点）
+    """
+    
+    NODE_TYPE = "ExportReportResult"
+    VERSION = "1.0.0"
+    CATEGORY = "output"
+    DISPLAY_NAME = "导出报告（结果）"
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audit_result": ("DICT",),
+                "export_format": (["excel", "json", "html", "pdf"], {"default": "excel"})
+            },
+            "optional": {
+                "save_path": ("STRING", {"default": ""}),
+                "file_name_template": ("STRING", {"default": "audit_report_{timestamp}"}),
+                "show_preview": ("BOOLEAN", {"default": True}),
+                "auto_open": ("BOOLEAN", {"default": False})
+            }
+        }
+    
+    RETURN_TYPES = ("DICT",)  # 返回结果信息用于节点内显示
+    RETURN_NAMES = ("result_info",)
+    FUNCTION = "export_report_result"
+    
+    def export_report_result(self, audit_result: Dict, export_format: str, save_path: str = "", 
+                            file_name_template: str = "audit_report_{timestamp}", 
+                            show_preview: bool = True, auto_open: bool = False):
+        """导出报告并在节点内显示结果"""
+        import os
+        import json
+        from datetime import datetime
+        
+        # 解析文件名模板
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        date_str = datetime.now().strftime("%Y%m%d")
+        time_str = datetime.now().strftime("%H%M%S")
+        
+        final_file_name = file_name_template.replace("{timestamp}", timestamp).replace("{date}", date_str).replace("{time}", time_str)
+        
+        # 确定保存路径
+        if save_path:
+            export_dir = os.path.join(settings.STORAGE_PATH, save_path)
+        else:
+            export_dir = os.path.join(settings.STORAGE_PATH, "output", "reports")
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # 导出文件（复用 ExportReportNode 的逻辑）
+        file_path = None
+        status = ""
+        
+        if export_format == "excel":
+            file_path = os.path.join(export_dir, f"{final_file_name}.xlsx")
+            with pd.ExcelWriter(file_path) as writer:
+                summary_df = pd.DataFrame([audit_result.get("summary", {})])
+                summary_df.to_excel(writer, sheet_name="摘要", index=False)
+                # 处理 findings 字段（可能是 dict 或 list）
+                findings = audit_result.get("findings", {})
+                if isinstance(findings, dict) and findings:
+                    # 如果是字典，转换为列表格式
+                    findings_list = []
+                    for key, value in findings.items():
+                        findings_list.append({"类型": key, "内容": str(value)})
+                    if findings_list:
+                        findings_df = pd.DataFrame(findings_list)
+                        findings_df.to_excel(writer, sheet_name="审计发现", index=False)
+                elif isinstance(findings, list) and findings:
+                    findings_df = pd.DataFrame(findings)
+                    findings_df.to_excel(writer, sheet_name="审计发现", index=False)
+        elif export_format == "json":
+            file_path = os.path.join(export_dir, f"{final_file_name}.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(audit_result, f, ensure_ascii=False, indent=2)
+        elif export_format == "html":
+            file_path = os.path.join(export_dir, f"{final_file_name}.html")
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="UTF-8"><title>审计报告</title></head>
+            <body>
+                <h1>审计报告</h1>
+                <pre>{json.dumps(audit_result, ensure_ascii=False, indent=2)}</pre>
+            </body>
+            </html>
+            """
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+        
+        status = f"已导出为 {export_format.upper()} 格式"
+        
+        # 返回结果信息（用于节点内显示）
+        result = {
+            "file_path": file_path,
+            "status": status,
+            "format": export_format,
+            "saved_at": datetime.now().isoformat(),
+            "file_size": os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0,
+            "preview": audit_result.get("summary", {}) if show_preview else None,
+            "show_preview": show_preview
+        }
+        
+        return (result,)
     
     def export_report(self, audit_result: Dict, export_format: str):
         """导出审计报告"""
@@ -517,8 +842,8 @@ class ExportReportNode(BaseNode):
         import json
         from datetime import datetime
         
-        # 确保导出目录存在
-        export_dir = "backend/output/reports"
+        # 确保导出目录存在（统一使用 STORAGE_PATH/output/reports）
+        export_dir = os.path.join(settings.STORAGE_PATH, "output", "reports")
         os.makedirs(export_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -596,12 +921,20 @@ NODE_CLASS_MAPPINGS = {
     "QuickPlotNode": QuickPlotNode,
     "DataFrameToTableNode": DataFrameToTableNode,
     "ResultGenerationNode": ResultGenerationNode,
-    "ExportReportNode": ExportReportNode
+    "ReportGeneration": ReportGenerationNode,
+    "ExportReportNode": ExportReportNode,
+    "SaveResult": SaveResultNode,
+    "PreviewResult": PreviewResultNode,
+    "ExportReportResult": ExportReportResultNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "QuickPlotNode": "快速绘图",
     "DataFrameToTableNode": "数据表预览",
     "ResultGenerationNode": "结果生成",
-    "ExportReportNode": "报告导出"
+    "ReportGeneration": "报告生成",
+    "ExportReportNode": "报告导出",
+    "SaveResult": "保存结果",
+    "PreviewResult": "预览结果",
+    "ExportReportResult": "导出报告（结果）"
 }
