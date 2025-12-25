@@ -719,82 +719,136 @@ class AnalysisReasoningAI(BaseNode):
 
 class HumanReviewNode(BaseNode):
     """
-    4 人工审核节点 - 支持人工介入和修正
+    审计决策登记器 - 把人的明确决策记录成可追溯、可复核、可签字的系统事实
+
+    核心职责：记录人工决策，驱动审计状态转换，确保审计结论的合法性
+    禁止行为：自行计算风险、自动生成结论、修改原始证据、覆盖AI/规则结果
+
+    API钩子：
+    - 入站：create_review_task（被ExportReportNode等调用）
+    - 出站：commit_review_decision（人工调用）
     """
-    
+
     NODE_TYPE = "HumanReviewNode"
-    VERSION = "1.0.0"
-    CATEGORY = "协同"
-    DISPLAY_NAME = "人工审核"
+    VERSION = "2.0.0"
+    CATEGORY = "审计决策"
+    DISPLAY_NAME = "审计决策登记器"
     
     @classmethod
     def INPUT_TYPES(cls):
+        # flat mapping expected by BaseNode.validate_inputs
         return {
-            "required": {
-                "risk_items": ("DATAFRAME",),
-                "risk_assessment": ("DICT",),
-                "audit_result": ("DICT",)  # optional reference to audit_result to update metadata
-            },
-            "optional": {
-                "reviewer_comment": ("STRING", {"multiline": True})
-            }
+            "action": {"type": "STRING", "required": True},
+            # For create_task action
+            "audit_result_id": {"type": "STRING", "required": False},
+            "trigger_source": {"type": "STRING", "required": False},
+            "trigger_reason": {"type": "STRING", "required": False},
+            "affected_rule_ids": {"type": "LIST", "required": False},
+            "analysis_refs": {"type": "LIST", "required": False},
+            # For commit_decision action
+            "task_id": {"type": "STRING", "required": False},
+            "reviewer_id": {"type": "STRING", "required": False},
+            "reviewer_name": {"type": "STRING", "required": False},
+            "reviewer_role": {"type": "STRING", "required": False},
+            "reviewer_license": {"type": "STRING", "required": False},
+            "decision_type": {"type": "STRING", "required": False},
+            "decision_comment": {"type": "STRING", "required": False},
+            "override_reason": {"type": "STRING", "required": False},
         }
-    
-    RETURN_TYPES = ("DATAFRAME", "STRING", "STRING", "INT")
-    RETURN_NAMES = ("reviewed_items", "review_status", "review_task_id", "audit_log_id")
-    FUNCTION = "review_items"
-    
-    def review_items(self, risk_items: pd.DataFrame, risk_assessment: Dict, 
-                    reviewer_comment: str = ""):
-        """人工审核处理"""
-        
-        # 模拟人工审核
-        reviewed_items = risk_items.copy()
-        
-        if not reviewed_items.empty:
-            # 添加审核状态列
-            reviewed_items["review_status"] = "已审核"
-            reviewed_items["reviewer_comment"] = reviewer_comment
-            reviewed_items["review_time"] = datetime.now().isoformat()
-            
-            # 模拟部分风险项被确认
-            if "risk_level" in reviewed_items.columns:
-                high_risk_mask = reviewed_items["risk_level"] == "HIGH"
-                reviewed_items.loc[high_risk_mask, "confirmed"] = True
-                reviewed_items.loc[~high_risk_mask, "confirmed"] = False
-        
-        review_status = f"已完成审核，共{len(reviewed_items)}项"
 
-        # Create a human review task (persist to storage) and write AuditLog/RuleAction
-        task_id = f"hr_{uuid.uuid4().hex[:8]}"
-        task_dir = Path(settings.STORAGE_PATH) / "tasks" / "human_review"
-        task_dir.mkdir(parents=True, exist_ok=True)
-        task_file = task_dir / f"{task_id}.json"
+    RETURN_TYPES = ("DICT",)
+    RETURN_NAMES = ("result",)
+    FUNCTION = "process_review_action"
+    
+    def process_review_action(self, action: str, **kwargs):
+        """
+        处理人工审核动作 - 审计决策登记器的核心方法
+
+        Args:
+            action: "create_task" | "commit_decision"
+            **kwargs: 对应的参数
+
+        Returns:
+            结果字典
+        """
+        if action == "create_task":
+            result = self._create_review_task(**kwargs)
+            return (result,)  # Return as tuple for BaseNode
+        elif action == "commit_decision":
+            result = self._commit_review_decision(**kwargs)
+            return (result,)  # Return as tuple for BaseNode
+        else:
+            result = {
+                "status": "error",
+                "message": f"Unsupported action: {action}",
+                "supported_actions": ["create_task", "commit_decision"]
+            }
+            return (result,)  # Return as tuple for BaseNode
+
+    def _create_review_task(self, audit_result_id: str = None, trigger_source: str = "ai_gov",
+                           trigger_reason: str = "", affected_rule_ids: List[str] = None,
+                           analysis_refs: List[str] = None, **kwargs):
+        """
+        创建人工复核任务 - 入站钩子，被其他节点调用
+
+        Args:
+            audit_result_id: 审计结果ID
+            trigger_source: 触发来源 (ai_gov/rule/analysis/export)
+            trigger_reason: 触发原因
+            affected_rule_ids: 受影响的规则ID列表
+            analysis_refs: 分析引用列表
+
+        Returns:
+            任务创建结果
+        """
+        # 生成任务ID
+        task_id = f"hr_{uuid.uuid4().hex[:12]}"
+
+        # 构建任务payload
         task_payload = {
             "task_id": task_id,
-            "workflow_id": risk_assessment.get("workflow_id") if isinstance(risk_assessment, dict) else None,
-            "run_id": risk_assessment.get("run_id") if isinstance(risk_assessment, dict) else None,
+            "audit_result_id": audit_result_id,
+            "trigger_source": trigger_source,
+            "trigger_reason": trigger_reason,
+            "affected_rule_ids": affected_rule_ids or [],
+            "analysis_refs": analysis_refs or [],
             "created_at": datetime.now().isoformat(),
-            "reviewer_comment": reviewer_comment,
-            "status": "pending",
-            "items_count": len(reviewed_items)
+            "status": "pending_review",  # 明确的状态机状态
+            "created_by": "system",  # 系统自动创建
         }
-        try:
-            task_file.write_text(json.dumps(task_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
 
-        # Log RuleAction / AuditLog
+        # 持久化任务到存储
+        storage_path = getattr(settings, "STORAGE_PATH", "./storage")
+        task_dir = Path(storage_path) / "tasks" / "human_review"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        task_file = task_dir / f"{task_id}.json"
+
+        try:
+            # 原子写入
+            tmp_file = task_dir / f".{task_id}.tmp"
+            tmp_file.write_text(json.dumps(task_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(str(tmp_file), str(task_file))
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to persist task: {str(e)}",
+                "task_id": task_id
+            }
+
+        # 写入审计日志 - RuleAction
         audit_log_id = None
         try:
             session = SessionLocal()
-            # RuleAction entry
             ra = RuleAction(
                 user_id="system",
-                action="create_human_review_task",
-                rule_id=None,
-                reason=f"Created human review task {task_id}",
-                metadata=task_payload
+                action="human_review_task_created",
+                rule_id=None,  # 人工复核任务不是针对特定规则
+                reason=f"Human review task created: {trigger_reason}",
+                metadata={
+                    "task_id": task_id,
+                    "trigger_source": trigger_source,
+                    "audit_result_id": audit_result_id
+                }
             )
             session.add(ra)
             session.commit()
@@ -811,188 +865,274 @@ class HumanReviewNode(BaseNode):
             except Exception:
                 pass
 
-        # If audit_result present, append review task ref into metadata (best-effort)
-        try:
-            if isinstance(risk_assessment, dict) and "audit_result" in risk_assessment and isinstance(risk_assessment["audit_result"], dict):
-                ar = risk_assessment["audit_result"]
-                meta = ar.get("metadata") or {}
-                refs = meta.get("review_tasks", [])
-                refs.append({"task_id": task_id, "created_at": task_payload["created_at"]})
-                meta["review_tasks"] = refs
-                ar["metadata"] = meta
-        except Exception:
-            pass
-
-        # Backwards-compatible: return ReviewResult that supports unpacking as 2 or 4 values
-        # task_id and audit_log_id are persisted (written)
-        return ReviewResult(reviewed_items, review_status, task_id, audit_log_id)
-
-    def create_from_remediation_task(self, task_id: str):
-        """
-        Create a human review entry from an existing remediation task created by ExportReportNode.
-        Idempotent: repeated calls with same task_id will not create duplicates.
-        Returns dict with task_id and status.
-        """
-        storage = getattr(settings, "STORAGE_PATH", "./storage")
-        task_dir = Path(storage) / "tasks" / "human_review"
-        task_file = task_dir / f"{task_id}.json"
-        processed_dir = task_dir / "processed"
-        processed_dir.mkdir(parents=True, exist_ok=True)
-        processed_marker = processed_dir / f"{task_id}.json"
-
-        if processed_marker.exists():
-            # already processed idempotently - return stored payload and snapshot if present
-            try:
-                payload = json.loads(processed_marker.read_text(encoding="utf-8"))
-                return {"task_id": task_id, "status": "exists", "payload": payload}
-            except Exception:
-                return {"task_id": task_id, "status": "exists"}
-
-        if not task_file.exists():
-            return {"task_id": task_id, "status": "missing"}
-
-        try:
-            task_payload = json.loads(task_file.read_text(encoding="utf-8"))
-        except Exception:
-            task_payload = {"task_id": task_id, "status": "unknown", "note": "failed to read task file"}
-
-        # create internal record (RuleAction / AuditLog) - best effort
-        audit_log_id = None
-        try:
-            session = SessionLocal()
-            ra = RuleAction(
-                user_id="system",
-                action="create_human_review_task_from_remediation",
-                rule_id=None,
-                reason=f"Created from remediation task {task_id}",
-                metadata=task_payload
-            )
-            session.add(ra)
-            session.commit()
-            session.refresh(ra)
-            audit_log_id = ra.id
-        except Exception:
-            try:
-                session.rollback()
-            except Exception:
-                pass
-        finally:
-            try:
-                session.close()
-            except Exception:
-                pass
-
-        # mark processed idempotently with payload and audit_log_id
-        processed_payload = {"task": task_payload, "created_at": datetime.now().isoformat(), "audit_log_id": audit_log_id}
-        try:
-            processed_marker.write_text(json.dumps(processed_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-        return {"task_id": task_id, "status": "created", "audit_log_id": audit_log_id, "payload": processed_payload}
-
-    def complete_review_and_sign(self, task_id: str, reviewer: Dict[str, str], decision: str, comment: Optional[str] = None):
-        """
-        Complete a remediation task: apply reviewer decision and, if approved, update AuditResult signatures.
-        decision: 'approve' | 'reject'
-        Returns dict with result and created snapshot path (if any).
-        """
-        storage = getattr(settings, "STORAGE_PATH", "./storage")
-        task_dir = Path(storage) / "tasks" / "human_review"
-        task_file = task_dir / f"{task_id}.json"
-        if not task_file.exists():
-            return {"task_id": task_id, "status": "missing_task"}
-
-        try:
-            task_payload = json.loads(task_file.read_text(encoding="utf-8"))
-        except Exception:
-            task_payload = {}
-
-        audit_result_id = task_payload.get("audit_result_id") or task_payload.get("audit_result")
-        snapshot_path = None
-        # locate audit_result snapshot file
-        if audit_result_id:
-            audit_root = Path(storage) / "audit"
-            for p in audit_root.rglob(f"*{audit_result_id}*.json"):
-                snapshot_path = p
-                break
-            if snapshot_path is None:
-                # not found by id, try to locate by workflow/run hints
-                audit_root = Path(storage) / "audit"
-        else:
-            # try to infer from task payload workflow/run references
-            wf = task_payload.get("workflow_id") or task_payload.get("workflow")
-            rn = task_payload.get("run_id") or task_payload.get("run")
-            if wf and rn:
-                cand_dir = Path(storage) / "audit" / wf / rn
-                if cand_dir.exists():
-                    # pick latest file
-                    files = sorted(cand_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-                    if files:
-                        snapshot_path = files[0]
-            if snapshot_path is None and not audit_result_id:
-                return {"task_id": task_id, "status": "no_audit_result_ref"}
-
-        if snapshot_path is None:
-            return {"task_id": task_id, "status": "audit_result_missing"}
-
-        # read existing audit_result
-        try:
-            ar = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {"task_id": task_id, "status": "failed_read_audit_result"}
-
-        # Prepare signature entry
-        sig_entry = {
-            "id": reviewer.get("id"),
-            "name": reviewer.get("name"),
-            "role": reviewer.get("role"),
-            "license": reviewer.get("license"),
-            "signature_time": datetime.now().isoformat(),
-            "comment": comment
+        return {
+            "status": "created",
+            "task_id": task_id,
+            "review_task_id": task_id,  # 向后兼容
+            "audit_log_id": audit_log_id,
+            "task_payload": task_payload
         }
 
-        # Update signatures structure
-        meta = ar.get("signatures", {}) or {}
-        if decision == "approve":
-            meta["approved_by"] = sig_entry
-            ar["signature_status"] = "approved"
+    def _commit_review_decision(self, task_id: str, reviewer_id: str, reviewer_name: str,
+                               reviewer_role: str = "auditor", reviewer_license: str = "",
+                               decision_type: str = "approve", decision_comment: str = "",
+                               override_reason: str = "", **kwargs):
+        """
+        提交人工审核决策 - 出站钩子，人工调用
+
+        Args:
+            task_id: 任务ID
+            reviewer_id: 审核人ID
+            reviewer_name: 审核人姓名
+            reviewer_role: 审核人角色
+            reviewer_license: 审核人执业证号
+            decision_type: 决策类型 (approve/reject/request_changes/override)
+            decision_comment: 决策评论（必填）
+            override_reason: 覆盖原因（override时必填）
+
+        Returns:
+            决策提交结果
+        """
+        # 验证必填字段
+        if not decision_comment.strip():
+            return {
+                "status": "error",
+                "message": "decision_comment is required and cannot be empty",
+                "task_id": task_id
+            }
+
+        if decision_type == "override" and not override_reason.strip():
+            return {
+                "status": "error",
+                "message": "override_reason is required for override decisions",
+                "task_id": task_id
+            }
+
+        # 读取任务
+        storage_path = getattr(settings, "STORAGE_PATH", "./storage")
+        task_dir = Path(storage_path) / "tasks" / "human_review"
+        task_file = task_dir / f"{task_id}.json"
+
+        if not task_file.exists():
+            return {
+                "status": "error",
+                "message": "Review task not found",
+                "task_id": task_id
+            }
+
+        try:
+            task_payload = json.loads(task_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {
+                "status": "error",
+                "message": "Failed to read review task",
+                "task_id": task_id
+            }
+
+        # 验证任务状态
+        current_status = task_payload.get("status")
+        if current_status not in ["pending_review", "in_review"]:
+            return {
+                "status": "error",
+                "message": f"Task status '{current_status}' does not allow decision commit",
+                "task_id": task_id
+            }
+
+        # 查找对应的AuditResult
+        audit_result_id = task_payload.get("audit_result_id")
+        snapshot_path = self._locate_audit_result_snapshot(audit_result_id, task_payload)
+
+        if not snapshot_path:
+            return {
+                "status": "error",
+                "message": "Associated audit result not found",
+                "task_id": task_id,
+                "audit_result_id": audit_result_id
+            }
+
+        # 读取并更新AuditResult
+        try:
+            audit_result = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {
+                "status": "error",
+                "message": "Failed to read audit result",
+                "task_id": task_id
+            }
+
+        # 准备签名条目
+        reviewer_info = {
+            "id": reviewer_id,
+            "name": reviewer_name,
+            "role": reviewer_role,
+            "license": reviewer_license,
+            "decision_time": datetime.now().isoformat(),
+            "decision_type": decision_type,
+            "comment": decision_comment
+        }
+
+        if decision_type == "override":
+            reviewer_info["override_reason"] = override_reason
+
+        # 更新签名和状态
+        signatures = audit_result.get("signatures", {})
+        metadata = audit_result.get("metadata", {})
+
+        if decision_type == "approve":
+            signatures["approved_by"] = reviewer_info
+            audit_result["signature_status"] = "approved"
+            new_status = "approved"
+        elif decision_type == "reject":
+            signatures["rejected_by"] = reviewer_info
+            audit_result["signature_status"] = "rejected"
+            new_status = "rejected"
+        elif decision_type == "request_changes":
+            signatures["changes_requested_by"] = reviewer_info
+            audit_result["signature_status"] = "changes_required"
+            new_status = "changes_required"
+        elif decision_type == "override":
+            signatures["overridden_by"] = reviewer_info
+            audit_result["signature_status"] = "approved"  # override后变为approved
+            new_status = "approved"
         else:
-            meta["rejected_by"] = sig_entry
-            ar["signature_status"] = "rejected"
+            return {
+                "status": "error",
+                "message": f"Unsupported decision_type: {decision_type}",
+                "task_id": task_id
+            }
 
-        ar["signatures"] = meta
+        audit_result["signatures"] = signatures
 
-        # write new versioned snapshot (do not overwrite original)
+        # 添加人工复核引用
+        human_review_refs = metadata.get("human_review_refs", [])
+        human_review_refs.append({
+            "task_id": task_id,
+            "decision": decision_type,
+            "reviewer": reviewer_id,
+            "timestamp": reviewer_info["decision_time"]
+        })
+        metadata["human_review_refs"] = human_review_refs
+        audit_result["metadata"] = metadata
+
+        # 创建新版本快照
         versions_dir = snapshot_path.parent
-        ts = datetime.now().strftime("%Y%m%d%H%M%S")
-        new_file = versions_dir / f"{audit_result_id}_v{ts}.json"
-        try:
-            # atomic write for snapshot
-            tmp = versions_dir / f".{audit_result_id}_v{ts}.tmp"
-            tmp.write_text(json.dumps(ar, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(str(tmp), str(new_file))
-        except Exception:
-            return {"task_id": task_id, "status": "failed_write_snapshot"}
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        new_snapshot_name = f"{audit_result_id}_reviewed_{timestamp}.json"
+        new_snapshot_path = versions_dir / new_snapshot_name
 
-        # AuditLog entry
+        try:
+            # 原子写入
+            tmp_file = versions_dir / f".{new_snapshot_name}.tmp"
+            tmp_file.write_text(json.dumps(audit_result, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(str(tmp_file), str(new_snapshot_path))
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to write updated audit result: {str(e)}",
+                "task_id": task_id
+            }
+
+        # 写入审计日志
         try:
             db = SessionLocal()
-            AuditService.log(db, action_type="human_review_complete", target_type="audit_result", target_id=audit_result_id, parameters={"task_id": task_id, "decision": decision, "reviewer": reviewer})
+            AuditService.log(
+                db,
+                action_type=f"human_review_{decision_type}",
+                target_type="audit_result",
+                target_id=audit_result_id,
+                parameters={
+                    "task_id": task_id,
+                    "reviewer_id": reviewer_id,
+                    "reviewer_name": reviewer_name,
+                    "decision_type": decision_type,
+                    "decision_comment": decision_comment
+                }
+            )
             db.close()
         except Exception:
             pass
 
-        # mark task processed/completed and return snapshot path
-        completed_marker = task_dir / "completed"
-        completed_marker.mkdir(parents=True, exist_ok=True)
-        completed_payload = {"task_id": task_id, "decision": decision, "reviewer": reviewer, "snapshot": str(new_file)}
+        # 更新任务状态
+        task_payload["status"] = new_status
+        task_payload["completed_at"] = datetime.now().isoformat()
+        task_payload["reviewer"] = reviewer_info
+
+        completed_dir = task_dir / "completed"
+        completed_dir.mkdir(parents=True, exist_ok=True)
+        completed_file = completed_dir / f"{task_id}.json"
+
         try:
-            (completed_marker / f"{task_id}.json").write_text(json.dumps(completed_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            completed_file.write_text(json.dumps(task_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
 
-        return {"task_id": task_id, "status": "completed", "snapshot": str(new_file)}
+        return {
+            "status": "completed",
+            "task_id": task_id,
+            "decision_type": decision_type,
+            "new_signature_status": audit_result["signature_status"],
+            "snapshot_path": str(new_snapshot_path),
+            "reviewer_info": reviewer_info
+        }
+
+    def _locate_audit_result_snapshot(self, audit_result_id: str = None, task_payload: Dict = None):
+        """定位AuditResult快照文件"""
+        storage_path = getattr(settings, "STORAGE_PATH", "./storage")
+        audit_root = Path(storage_path) / "audit"
+
+        # 1. 通过audit_result_id直接查找
+        if audit_result_id:
+            for snapshot_file in audit_root.rglob(f"*{audit_result_id}*.json"):
+                return snapshot_file
+
+        # 2. 通过workflow_id和run_id推断
+        if task_payload:
+            workflow_id = task_payload.get("workflow_id") or task_payload.get("workflow")
+            run_id = task_payload.get("run_id") or task_payload.get("run")
+
+            if workflow_id and run_id:
+                candidate_dir = audit_root / workflow_id / run_id
+                if candidate_dir.exists():
+                    # 选择最新的文件
+                    json_files = list(candidate_dir.glob("*.json"))
+                    if json_files:
+                        return max(json_files, key=lambda p: p.stat().st_mtime)
+
+        return None
+
+    # 向后兼容的方法 - 建议逐步迁移到新的API
+    def create_from_remediation_task(self, task_id: str):
+        """
+        向后兼容方法 - 从现有的remediation任务创建人工复核条目
+        建议迁移到新的 process_review_action(action="create_task", ...) API
+        """
+        return self._create_review_task(audit_result_id=None, trigger_source="remediation",
+                                       trigger_reason=f"Legacy remediation task {task_id}")
+
+    # 向后兼容的方法 - 建议逐步迁移到新的API
+    def complete_review_and_sign(self, task_id: str, reviewer: Dict[str, str], decision: str, comment: Optional[str] = None):
+        """
+        向后兼容方法 - 完成remediation任务并签名
+        建议迁移到新的 process_review_action(action="commit_decision", ...) API
+        """
+        # 映射旧的参数格式到新的API
+        decision_type_map = {
+            "approve": "approve",
+            "reject": "reject"
+        }
+
+        if decision not in decision_type_map:
+            return {"task_id": task_id, "status": "error", "message": f"Unsupported decision: {decision}"}
+
+        return self._commit_review_decision(
+            task_id=task_id,
+            reviewer_id=reviewer.get("id", ""),
+            reviewer_name=reviewer.get("name", ""),
+            reviewer_role=reviewer.get("role", "auditor"),
+            reviewer_license=reviewer.get("license", ""),
+            decision_type=decision_type_map[decision],
+            decision_comment=comment or ""
+        )
 
 
 NODE_CLASS_MAPPINGS = {
