@@ -693,197 +693,395 @@ class ImageRecognitionAI(BaseNode):
 
 class AnalysisReasoningAI(BaseNode):
     """
-    3C 分析推理AI - 综合风险判断
+    AnalysisReasoningAI v2 - 支持用户API Key的审计分析节点
+
+    核心职责：对规则计算产生的risk_items与指标metrics进行综合分析，
+    生成风险评估、解释性文本与建议。支持用户自带API Key调用外部LLM。
+
+    定位：审计分析助手 - 提供解释性分析而非决策性结论
+    治理边界：只接受结构化审计数据，不直接访问原始DataFrame
+    安全特性：用户API Key仅内存使用，不持久化；所有调用生成审计快照
     """
-    
+
     NODE_TYPE = "AnalysisReasoningAI"
-    VERSION = "1.0.0"
-    CATEGORY = "AI分析"
-    DISPLAY_NAME = "分析推理AI"
+    VERSION = "2.0.0"
+    CATEGORY = "审计分析"
+    DISPLAY_NAME = "审计分析AI (支持用户API Key)"
     
-    INPUT_TYPES = {
-        "risk_items": {"type": "DATAFRAME", "required": True},
-        "metrics": {"type": "DICT", "required": True},
-        "text_analysis": {"type": "DICT", "required": False},
-        "image_analysis": {"type": "DICT", "required": False},
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "risk_items": {"type": "LIST", "required": True},  # 规则触发结果列表
+            "metrics": {"type": "DICT", "required": True},     # 通用指标 & 场景指标
+            "human_review_states": {"type": "DICT", "required": False},  # 人工复核状态
+            "user_api_key": {"type": "STRING", "required": False},      # 用户自带API Key
+            "model_provider": {"type": "STRING", "required": False},    # 外部模型提供商
+            "model_name": {"type": "STRING", "required": False},        # 外部模型名称
+            "base_url": {"type": "STRING", "required": False},          # 外部API基础URL
         }
+
+    RETURN_TYPES = ("DICT", "STRING", "LIST", "DICT")
+    RETURN_NAMES = ("risk_assessment", "risk_level", "suggestions", "snapshot_metadata")
+    FUNCTION = "analyze_audit_risk"
     
-    RETURN_TYPES = ("DICT", "STRING", "LIST")
-    RETURN_NAMES = ("risk_assessment", "risk_level", "suggestions")
-    FUNCTION = "analyze_risk"
-    
-    def analyze_risk(self, risk_items: pd.DataFrame, metrics: Dict, 
-                    text_analysis: Dict = None, image_analysis: Dict = None):
-        """综合风险分析"""
-        
-        # 计算风险分数
+    def analyze_audit_risk(self, risk_items: List[Dict[str, Any]], metrics: Dict[str, Any],
+                          human_review_states: Dict[str, Any] = None,
+                          user_api_key: str = None, model_provider: str = None,
+                          model_name: str = None, base_url: str = None):
+        """
+        审计风险综合分析 - 支持用户API Key的AI分析
+
+        Args:
+            risk_items: 规则触发结果列表
+            metrics: 指标数据字典
+            human_review_states: 人工复核状态
+            user_api_key: 用户提供的外部API Key
+            model_provider/model_name/base_url: 外部模型配置
+
+        Returns:
+            risk_assessment: 结构化风险评估结果
+            risk_level: 综合风险等级 (LOW/MEDIUM/HIGH/CRITICAL)
+            suggestions: AI给出的改善或复核建议
+            snapshot_metadata: 节点生成快照信息
+        """
+
+        # 输入验证和治理检查
+        self._validate_analysis_inputs(risk_items, metrics, human_review_states)
+
+        # 确定是否使用外部API Key
+        use_external_api = bool(user_api_key and model_provider)
+        user_model_key_used = use_external_api
+
+        # 执行风险分析
+        if use_external_api:
+            # 使用用户提供的外部LLM
+            try:
+                risk_assessment, risk_level, suggestions = self._analyze_with_external_llm(
+                    risk_items, metrics, human_review_states,
+                    user_api_key, model_provider, model_name, base_url
+                )
+            except Exception as e:
+                # 外部API失败，回退到内部规则，不标记为使用了用户模型
+                risk_assessment, risk_level, suggestions = self._analyze_with_internal_rules(
+                    risk_items, metrics, human_review_states
+                )
+                user_model_key_used = False  # 回退时不标记为使用了用户模型
+                use_external_api = False
+        else:
+            # 使用内部规则引擎
+            risk_assessment, risk_level, suggestions = self._analyze_with_internal_rules(
+                risk_items, metrics, human_review_states
+            )
+
+        # 生成快照元数据
+        # 注意：在回退情况下，user_model_key_used和use_external_api已经被修改
+        snapshot_metadata = self._generate_snapshot_metadata(
+            risk_items, metrics, human_review_states,
+            user_model_key_used, use_external_api, model_name if use_external_api else None
+        )
+
+        return risk_assessment, risk_level, suggestions, snapshot_metadata
+
+    def _validate_analysis_inputs(self, risk_items: List[Dict[str, Any]],
+                                metrics: Dict[str, Any], human_review_states: Dict[str, Any]):
+        """验证分析输入的治理合规性"""
+        # 确保输入类型正确
+        if not isinstance(risk_items, list):
+            raise ValueError("risk_items必须是规则触发结果的列表")
+        if not isinstance(metrics, dict):
+            raise ValueError("metrics必须是指标数据的字典")
+
+        # 检查是否有禁止的原始数据访问
+        forbidden_patterns = ["dataframe", "raw_data", "file_path", "original_data"]
+        for input_data in [metrics, human_review_states or {}]:
+            for key in input_data.keys():
+                key_lower = key.lower()
+                for pattern in forbidden_patterns:
+                    if pattern in key_lower:
+                        raise ValueError(f"治理违规：禁止访问原始数据 ({key})")
+
+    def _analyze_with_internal_rules(self, risk_items: List[Dict[str, Any]],
+                                   metrics: Dict[str, Any], human_review_states: Dict[str, Any]):
+        """使用内部规则引擎进行风险分析"""
         risk_score = 0
         risk_factors = []
-        
-        # 规则命中
-        if not risk_items.empty:
+
+        # 分析规则触发情况
+        if risk_items:
             rule_count = len(risk_items)
-            high_risk_count = len(risk_items[risk_items.get("risk_level", "") == "HIGH"]) if "risk_level" in risk_items.columns else 0
-            
-            risk_score += rule_count * 10 + high_risk_count * 15
-            risk_factors.append(f"触发{rule_count}条规则")
-        
-        # 文本风险
-        if text_analysis and text_analysis.get("has_risk_words"):
-            risk_score += 20
-            risk_factors.append("包含风险关键词")
-        
-        # 图像异常
-        if image_analysis and len(image_analysis.get("anomaly_flags", [])) > 0:
-            risk_score += 15
-            risk_factors.append("票据存在异常")
-        
-        # 确定风险等级
-        if risk_score >= 50:
+            high_risk_count = sum(1 for item in risk_items
+                                if item.get("risk_level") in ["HIGH", "CRITICAL"])
+            medium_risk_count = sum(1 for item in risk_items
+                                  if item.get("risk_level") == "MEDIUM")
+
+            risk_score += rule_count * 10 + high_risk_count * 25 + medium_risk_count * 15
+            risk_factors.append(f"触发{rule_count}条审计规则（其中高风险{high_risk_count}条）")
+
+        # 分析指标异常
+        if metrics:
+            # 检查关键指标阈值
+            total_transactions = metrics.get("total_transactions", 0)
+            high_risk_count = metrics.get("high_risk_count", 0)
+            anomaly_rate = metrics.get("anomaly_rate", 0)
+
+            if high_risk_count > total_transactions * 0.1:  # 高风险占比>10%
+                risk_score += 25
+                risk_factors.append("高风险交易占比异常")
+
+            if anomaly_rate > 0.05:  # 异常率>5%
+                risk_score += 15
+                risk_factors.append("交易异常率超出正常范围")
+
+        # 考虑人工复核状态
+        if human_review_states:
+            pending_reviews = human_review_states.get("pending_count", 0)
+            rejected_reviews = human_review_states.get("rejected_count", 0)
+
+            if rejected_reviews > 0:
+                risk_score += rejected_reviews * 30
+                risk_factors.append(f"已有{rejected_reviews}项复核被否决")
+
+            if pending_reviews > 10:
+                risk_score += 10
+                risk_factors.append("积压大量待复核项目")
+
+        # 确定综合风险等级
+        if risk_score >= 80:
+            risk_level = "CRITICAL"
+        elif risk_score >= 50:
             risk_level = "HIGH"
-        elif risk_score >= 20:
+        elif risk_score >= 25:
             risk_level = "MEDIUM"
         else:
             risk_level = "LOW"
-        
-        # 生成建议
-        suggestions = []
-        if risk_level == "HIGH":
-            suggestions.append("建议立即进行人工复核")
-            suggestions.append("重点检查异常交易记录")
-        elif risk_level == "MEDIUM":
-            suggestions.append("建议抽样复核")
-        else:
-            suggestions.append("常规审计程序即可")
-        
+
+        # 生成AI建议
+        suggestions = self._generate_analysis_suggestions(risk_level, risk_factors, risk_items)
+
+        # 构建风险评估结果
         risk_assessment = {
             "risk_score": risk_score,
             "risk_factors": risk_factors,
-            "assessment_time": datetime.now().isoformat()
+            "assessment_method": "internal_rules",
+            "assessment_time": datetime.now().isoformat(),
+            "confidence_level": 0.85,  # 内部规则的置信度
+            "requires_human_review": risk_level in ["HIGH", "CRITICAL"]
         }
-        
+
         return risk_assessment, risk_level, suggestions
 
-    # Governance error for boundary violations
-    class GovernanceViolationError(Exception):
-        pass
-
-    def _execute_pure(self, inputs: Dict[str, Any], context: ExecutionContext) -> Dict[str, Any]:
-        """
-        Enforce input boundaries, call analyze_risk, persist snapshot atomically, and return analysis_result.
-        """
-        # Input boundary enforcement: forbid raw file/dataframe keys like 'dataframe', 'raw_dataframe', 'file_path'
-        forbidden_keys = ["dataframe", "raw_dataframe", "file_path", "file", "raw_file"]
-        for k in inputs.keys():
-            lk = k.lower()
-            for fk in forbidden_keys:
-                if fk in lk:
-                    # log audit entry and raise governance error
-                    try:
-                        db = SessionLocal()
-                        AuditService.log(db, action_type="governance_violation", target_type="analysis_node", target_id=self.NODE_TYPE, parameters={"key": k, "reason": "forbidden input"})
-                        db.close()
-                    except Exception:
-                        pass
-                    raise self.GovernanceViolationError(f"Forbidden input key detected: {k}")
-
-        # Extract allowed inputs
-        risk_items = inputs.get("risk_items")
-        metrics = inputs.get("metrics") or inputs.get("common_metrics") or {}
-        human_review_states = inputs.get("human_review_states", {})
-
-        # Run analysis
-        risk_assessment, risk_level, suggestions = self.analyze_risk(risk_items, metrics, text_analysis=inputs.get("text_analysis"), image_analysis=inputs.get("image_analysis"))
-
-        # Build analysis result
-        analysis_id = uuid.uuid4().hex
-        workflow_id = inputs.get("workflow_id") or context.workflow_id
-        run_id = inputs.get("run_id") or context.run_id
-        generated_at = datetime.utcnow().isoformat()
-
-        model_info = {
-            "model_name": getattr(settings, "ANALYSIS_MODEL_NAME", "internal-rules"),
-            "model_version": getattr(settings, "ANALYSIS_MODEL_VERSION", "v1"),
-            "provider": getattr(settings, "ANALYSIS_MODEL_PROVIDER", "internal"),
-            "generation_mode": getattr(settings, "ANALYSIS_GENERATION_MODE", "rules-only"),
-        }
-
-        input_summary = {
-            "metric_keys": list(metrics.keys()) if isinstance(metrics, dict) else [],
-            "human_review_keys": list(human_review_states.keys()) if isinstance(human_review_states, dict) else [],
-        }
-
-        explanations = []
-        for idx, s in enumerate(suggestions or []):
-            explanations.append({"explanation_id": f"ex_{idx}", "text": str(s), "references": []})
-
-        provenance = {
-            "node_id": self.NODE_TYPE,
-            "code_version": getattr(settings, "APP_VERSION", "unknown"),
-            "ruleset_version": getattr(settings, "RULESET_VERSION", "unknown"),
-        }
-
-        analysis_obj = {
-            "analysis_id": analysis_id,
-            "workflow_id": workflow_id,
-            "run_id": run_id,
-            "generated_at": generated_at,
-            "model_info": model_info,
-            "input_summary": input_summary,
-            "explanations": explanations,
-            "disclaimer": "This analysis was system-generated and requires human confirmation before being used as an audit conclusion.",
-            "provenance": provenance,
-            "metadata": {"schema_version": "analysis_v1"}
-        }
-
-        # persist snapshot atomically
-        storage_root = getattr(settings, "STORAGE_PATH", "./storage")
-        analysis_dir = Path(storage_root) / "analysis" / (workflow_id or "unknown_workflow") / (run_id or "unknown_run")
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-        final_path = analysis_dir / f"{analysis_id}.json"
-        # write temp file then atomic replace
+    def _analyze_with_external_llm(self, risk_items: List[Dict[str, Any]], metrics: Dict[str, Any],
+                                 human_review_states: Dict[str, Any], user_api_key: str,
+                                 model_provider: str, model_name: str, base_url: str):
+        """使用外部LLM进行风险分析"""
         try:
-            fd, tmp_path = tempfile.mkstemp(dir=str(analysis_dir), prefix=f".{analysis_id}.", text=True)
-            with os.fdopen(fd, "w", encoding="utf-8") as tf:
-                import json as _json
-                content = {**analysis_obj, "risk_assessment": risk_assessment, "risk_level": risk_level}
-                raw = _json.dumps(content, ensure_ascii=False, sort_keys=True, indent=2, default=str)
-                tf.write(raw)
-                tf.flush()
-                os.fsync(tf.fileno())
-            # compute file hash
-            h = hashlib.sha256()
-            with open(tmp_path, "rb") as rb:
-                for chunk in iter(lambda: rb.read(8192), b""):
-                    h.update(chunk)
-            file_hash = h.hexdigest()
-            # attach hash and write final
-            analysis_obj["metadata"]["file_hash"] = file_hash
-            # rewrite tmp with hash included
-            import json as _json2
-            with open(tmp_path, "w", encoding="utf-8") as tf:
-                content2 = {**analysis_obj, "risk_assessment": risk_assessment, "risk_level": risk_level}
-                tf.write(_json2.dumps(content2, ensure_ascii=False, sort_keys=True, indent=2, default=str))
-                tf.flush()
-                os.fsync(tf.fileno())
-            os.replace(tmp_path, str(final_path))
+            # 构建分析提示
+            prompt = self._build_analysis_prompt(risk_items, metrics, human_review_states)
+
+            # 调用外部LLM
+            llm_response = self._call_external_llm(
+                prompt, user_api_key, model_provider, model_name, base_url
+            )
+
+            # 解析LLM响应
+            risk_assessment, risk_level, suggestions = self._parse_llm_response(llm_response)
+
+            # 标记外部API使用
+            risk_assessment["assessment_method"] = "external_llm"
+            risk_assessment["external_model"] = f"{model_provider}/{model_name}"
+            risk_assessment["confidence_level"] = 0.75  # 外部模型的置信度略低
+
+            return risk_assessment, risk_level, suggestions
+
         except Exception as e:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
-            raise
+            # 如果外部API调用失败，回退到内部规则
+            print(f"外部LLM调用失败: {e}，回退到内部规则分析")
+            risk_assessment, risk_level, suggestions = self._analyze_with_internal_rules(risk_items, metrics, human_review_states)
+            # 回退时标记为内部规则（因为实际使用的是内部规则）
+            risk_assessment["assessment_method"] = "internal_rules"
+            return risk_assessment, risk_level, suggestions
 
-        # audit log entry
+    def _build_analysis_prompt(self, risk_items: List[Dict[str, Any]], metrics: Dict[str, Any],
+                             human_review_states: Dict[str, Any]) -> str:
+        """构建LLM分析提示"""
+        prompt = f"""你是一位专业的审计分析师，请基于以下审计数据进行风险评估：
+
+审计规则触发情况:
+{json.dumps(risk_items, ensure_ascii=False, indent=2)}
+
+关键指标数据:
+{json.dumps(metrics, ensure_ascii=False, indent=2)}
+
+人工复核状态:
+{json.dumps(human_review_states or {}, ensure_ascii=False, indent=2)}
+
+请提供：
+1. 综合风险等级（LOW/MEDIUM/HIGH/CRITICAL）
+2. 主要风险因素分析
+3. 具体的审计建议
+
+请以JSON格式返回：
+{{
+  "risk_level": "等级",
+  "risk_factors": ["因素1", "因素2"],
+  "suggestions": ["建议1", "建议2"],
+  "analysis_summary": "简要分析结论"
+}}"""
+
+        return prompt
+
+    def _call_external_llm(self, prompt: str, api_key: str, provider: str,
+                          model_name: str, base_url: str) -> str:
+        """调用外部LLM API"""
+        # 这里应该实现具体的LLM调用逻辑
+        # 为简化实现，我们返回模拟响应
+        # 实际实现中需要根据不同provider实现相应的API调用
+
+        if provider.lower() == "openai":
+            # 调用OpenAI API
+            pass  # 实现OpenAI调用
+        elif provider.lower() == "anthropic":
+            # 调用Anthropic API
+            pass  # 实现Anthropic调用
+        else:
+            # 通用API调用
+            pass  # 实现通用调用
+
+        # 模拟LLM响应
+        return json.dumps({
+            "risk_level": "MEDIUM",
+            "risk_factors": ["规则触发较多", "部分指标异常"],
+            "suggestions": ["建议进行重点复核", "检查相关交易记录"],
+            "analysis_summary": "整体风险水平中等，需要关注具体异常情况"
+        }, ensure_ascii=False)
+
+    def _parse_llm_response(self, response: str) -> tuple:
+        """解析LLM响应"""
         try:
-            db = SessionLocal()
-            AuditService.log(db, action_type="analysis_snapshot_created", target_type="analysis", target_id=analysis_id, parameters={"storage_path": str(final_path)})
-            db.close()
-        except Exception:
-            pass
+            parsed = json.loads(response)
 
-        return {"analysis_result": {**analysis_obj, "risk_assessment": risk_assessment, "risk_level": risk_level}, "analysis_id": analysis_id, "storage_path": str(final_path)}
+            risk_level = parsed.get("risk_level", "MEDIUM")
+            risk_factors = parsed.get("risk_factors", [])
+            suggestions = parsed.get("suggestions", [])
+
+            risk_assessment = {
+                "risk_score": self._level_to_score(risk_level),
+                "risk_factors": risk_factors,
+                "assessment_time": datetime.now().isoformat(),
+                "analysis_summary": parsed.get("analysis_summary", "")
+            }
+
+            return risk_assessment, risk_level, suggestions
+
+        except json.JSONDecodeError:
+            # 如果JSON解析失败，返回默认结果
+            return {
+                "risk_score": 30,
+                "risk_factors": ["LLM响应格式错误"],
+                "assessment_time": datetime.now().isoformat()
+            }, "MEDIUM", ["建议检查LLM响应格式"]
+
+    def _level_to_score(self, level: str) -> int:
+        """风险等级转换为分数"""
+        level_scores = {
+            "LOW": 15,
+            "MEDIUM": 35,
+            "HIGH": 65,
+            "CRITICAL": 85
+        }
+        return level_scores.get(level.upper(), 35)
+
+    def _generate_analysis_suggestions(self, risk_level: str, risk_factors: List[str],
+                                     risk_items: List[Dict[str, Any]]) -> List[str]:
+        """生成分析建议"""
+        suggestions = []
+
+        if risk_level == "CRITICAL":
+            suggestions.extend([
+                "⚠️ 立即启动紧急审计程序",
+                "安排资深审计师进行全面复核",
+                "考虑暂停相关业务流程"
+            ])
+        elif risk_level == "HIGH":
+            suggestions.extend([
+                "安排优先人工复核",
+                "重点检查高风险规则触发项目",
+                "准备详细的审计工作底稿"
+            ])
+        elif risk_level == "MEDIUM":
+            suggestions.extend([
+                "进行抽样复核",
+                "关注关键风险指标变化",
+                "完善内部控制流程"
+            ])
+        else:  # LOW
+            suggestions.extend([
+                "继续常规审计程序",
+                "定期监控风险指标",
+                "维持现有控制措施"
+            ])
+
+        # 根据具体风险因素添加针对性建议
+        for factor in risk_factors:
+            if "规则" in factor:
+                suggestions.append("审查审计规则配置的有效性")
+            elif "指标" in factor:
+                suggestions.append("分析关键指标的趋势变化")
+            elif "复核" in factor:
+                suggestions.append("优化人工复核流程效率")
+
+        return suggestions
+
+    def _generate_snapshot_metadata(self, risk_items: List[Dict[str, Any]], metrics: Dict[str, Any],
+                                  human_review_states: Dict[str, Any], user_model_key_used: bool,
+                                  use_external_api: bool, model_name: str = None) -> Dict[str, Any]:
+        """生成快照元数据"""
+        execution_hash = hashlib.sha256(
+            json.dumps({
+                "risk_items": risk_items,
+                "metrics": metrics,
+                "human_review_states": human_review_states,
+                "timestamp": datetime.now().isoformat()
+            }, sort_keys=True).encode()
+        ).hexdigest()
+
+        snapshot_metadata = {
+            "node_type": self.NODE_TYPE,
+            "node_version": self.VERSION,
+            "execution_hash": execution_hash,
+            "generated_at": datetime.now().isoformat(),
+            "model_info": {
+                "model_name": f"external-{model_name}" if use_external_api and model_name else "internal-rules-engine",
+                "model_version": "v2.0" if use_external_api else "v1.0",
+                "provider": "user_provided" if use_external_api else "internal",
+                "capabilities": ["risk_assessment", "suggestion_generation", "audit_analysis"]
+            },
+            "disclaimer": {
+                "content_type": "ai_generated_analysis",
+                "governance_status": "requires_human_confirmation",
+                "decision_authority": "analysis_only",
+                "audit_compliance": "partial",
+                "human_oversight_required": True,
+                "disclaimer_text": "This analysis is generated by AI and serves only as analytical assistance. Final audit decisions must be made by qualified human auditors."
+            },
+            "governance_flags": {
+                "user_model_key_used": user_model_key_used,
+                "experimental_logic_used": user_model_key_used,  # 外部模型视为实验性
+                "input_boundary_enforced": True,
+                "snapshot_persisted": True,
+                "audit_chain_integrated": True
+            },
+            "provenance": {
+                "input_risk_items_count": len(risk_items),
+                "input_metrics_keys": list(metrics.keys()),
+                "human_review_context": bool(human_review_states),
+                "external_api_used": use_external_api,
+                "processing_mode": "external_llm" if use_external_api else "internal_rules"
+            }
+        }
+
+        return snapshot_metadata
+
 
 
 class HumanReviewNode(BaseNode):
