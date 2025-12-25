@@ -4,6 +4,7 @@ AI分析层节点 - 文本理解、图像识别和综合分析
 
 import json
 import re
+import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,7 +47,7 @@ class TextUnderstandingAI(BaseNode):
     强制要求：原文锚定、字段级置信度、抽取来源标记
     禁止行为：语义总结、合并推理、跨文档推断
     """
-
+    
     NODE_TYPE = "TextUnderstandingAI"
     VERSION = "2.0.0"
     CATEGORY = "文本结构化"
@@ -56,7 +57,7 @@ class TextUnderstandingAI(BaseNode):
     def INPUT_TYPES(cls):
         # flat mapping expected by BaseNode.validate_inputs
         return {
-            "text_data": {"type": "STRING", "required": True},
+        "text_data": {"type": "STRING", "required": True},
             "template_type": {"type": "STRING", "required": True},
             "custom_fields": {"type": "STRING", "required": False},
             "extraction_method": {"type": "STRING", "required": False},
@@ -422,104 +423,272 @@ class TextUnderstandingAI(BaseNode):
 
 class ImageRecognitionAI(BaseNode):
     """
-    3B 图像/票据识别AI - 深度票据审查
+    图像票据事实结构化引擎 - 从OCR文本中抽取结构化票据字段并提供原文锚定
+
+    核心职责：票据文本 → 结构化字段抽取（金额、日期、主体、号码等）
+    强制要求：原文锚定、字段级置信度、抽取来源标记
+    禁止行为：真伪判断、重复检查、风险评估（交给RuleCalculationNode）
+
+    区别于TextUnderstandingAI：专门处理票据类结构化文档
     """
     
     NODE_TYPE = "ImageRecognitionAI"
-    VERSION = "1.0.0"
-    CATEGORY = "AI分析"
-    DISPLAY_NAME = "票据识别AI"
+    VERSION = "2.0.0"
+    CATEGORY = "票据结构化"
+    DISPLAY_NAME = "图像票据事实结构化引擎"
     
     @classmethod
     def INPUT_TYPES(cls):
+        # flat mapping expected by BaseNode.validate_inputs
         return {
-            "required": {
-                "ocr_text": ("STRING", {}),
-                "check_type": (["duplicate", "authenticity", "anomaly"], {"default": "anomaly"})
-            }
+            "ocr_text": {"type": "STRING", "required": True},
+            "template_type": {"type": "STRING", "required": True},  # invoice | receipt | contract | custom
+            "custom_fields": {"type": "STRING", "required": False},
+            "extraction_method": {"type": "STRING", "required": False},  # hybrid | llm | rule
+            "confidence_threshold": {"type": "FLOAT", "required": False},
+            "provider": {"type": "STRING", "required": False},
+            "model": {"type": "STRING", "required": False},
+            "api_key": {"type": "STRING", "required": False},
+            "base_url": {"type": "STRING", "required": False},
         }
     
     RETURN_TYPES = ("DICT", "LIST")
-    RETURN_NAMES = ("validation_result", "anomaly_flags")
-    FUNCTION = "recognize_ticket"
-    
-    def recognize_ticket(self, ocr_text: str, check_type: str):
-        """票据识别处理
+    RETURN_NAMES = ("structured_fields", "extraction_metadata")
+    FUNCTION = "extract_ticket_facts"
 
-        返回约定格式：
-        - 第一个返回值为 response dict（包含 schema_version/response_id/processed_at/model_version/disclaimer/validation_result/warnings/errors）
-        - 第二个返回值为 anomaly_flags 列表（每项结构化为 {code, message, provenance?}）
-        保持向后兼容：原先直接返回 validation_result dict 的逻辑仍可由 response["validation_result"] 访问。
-        """
-        # 基本校验与约束
-        MAX_OCR_CHARS = 200000
-        response_meta = {
-            "schema_version": "ImageRecognitionAI:v0.1",
-            "response_id": str(uuid.uuid4()),
-            "processed_at": datetime.utcnow().isoformat(),
-            "model_version": None,
-            "disclaimer": "machine-generated; for reviewer use only",
-            "warnings": [],
-            "errors": None,
+    # 票据字段模板定义
+    TICKET_TEMPLATES = {
+        "invoice": {
+            "invoice_number": {
+                "type": "reference",
+                "description": "发票号码",
+                "patterns": [r"发票号码?[为:：]*([A-Za-z0-9\-]+)", r"发票号[为:：]*([A-Za-z0-9\-]+)"]
+            },
+            "amount": {
+                "type": "currency",
+                "description": "发票金额",
+                "patterns": [r"金额[为:：]*(\d+(?:\.\d+)?)元?", r"小计[为:：]*(\d+(?:\.\d+)?)"]
+            },
+            "tax_amount": {
+                "type": "currency",
+                "description": "税额",
+                "patterns": [r"税额[为:：]*(\d+(?:\.\d+)?)", r"增值税[为:：]*(\d+(?:\.\d+)?)"]
+            },
+            "invoice_date": {
+                "type": "date",
+                "description": "开票日期",
+                "patterns": [r"开票日期[为:：]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})", r"日期[为:：]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})"]
+            },
+            "seller_name": {
+                "type": "entity",
+                "description": "销方名称",
+                "patterns": [r"销方名称[为:：]*([^，。；\n]+)", r"销售方[为:：]*([^，。；\n]+)"]
+            },
+            "buyer_name": {
+                "type": "entity",
+                "description": "购方名称",
+                "patterns": [r"购方名称[为:：]*([^，。；\n]+)", r"购买方[为:：]*([^，。；\n]+)"]
+            },
+            "seller_tax_id": {
+                "type": "reference",
+                "description": "销方税号",
+                "patterns": [r"销方税号[为:：]*([A-Za-z0-9]+)", r"纳税人识别号[为:：]*([A-Za-z0-9]+)"]
+            },
+        },
+        "receipt": {
+            "receipt_number": {
+                "type": "reference",
+                "description": "收据号码",
+                "patterns": [r"收据号码?[为:：]*([A-Za-z0-9\-]+)", r"收据号[为:：]*([A-Za-z0-9\-]+)"]
+            },
+            "amount": {
+                "type": "currency",
+                "description": "收据金额",
+                "patterns": [r"金额[为:：]*(\d+(?:\.\d+)?)元?", r"￥(\d+(?:\.\d+)?)"]
+            },
+            "receipt_date": {
+                "type": "date",
+                "description": "收据日期",
+                "patterns": [r"日期[为:：]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})", r"(\d{4}年\d{1,2}月\d{1,2}日)"]
+            },
+            "payee": {
+                "type": "entity",
+                "description": "收款人",
+                "patterns": [r"收款人[为:：]*([^，。；\n]+)", r"收款单位[为:：]*([^，。；\n]+)"]
+            },
+            "payer": {
+                "type": "entity",
+                "description": "付款人",
+                "patterns": [r"付款人[为:：]*([^，。；\n]+)", r"付款单位[为:：]*([^，。；\n]+)"]
+            },
+        },
+        "contract": {
+            "contract_number": {
+                "type": "reference",
+                "description": "合同编号",
+                "patterns": [r"合同号码?[为:]*([A-Za-z0-9\-]+)", r"合同号[为:]*([A-Za-z0-9\-]+)"]
+            },
+            "amount": {
+                "type": "currency",
+                "description": "合同金额",
+                "patterns": [r"合同金额[为:]*(\d+(?:\.\d+)?)元?", r"总金额[为:]*(\d+(?:\.\d+)?)"]
+            },
+            "effective_date": {
+                "type": "date",
+                "description": "合同生效日期",
+                "patterns": [r"生效日期[为:]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})", r"自(\d{4}年\d{1,2}月\d{1,2}日)起"]
+            },
+            "party_a": {
+                "type": "entity",
+                "description": "甲方",
+                "patterns": [r"甲方[为:]*([^，。；\n]+)", r"委托人[为:]*([^，。；\n]+)"]
+            },
+            "party_b": {
+                "type": "entity",
+                "description": "乙方",
+                "patterns": [r"乙方[为:]*([^，。；\n]+)", r"受托人[为:]*([^，。；\n]+)"]
+            },
         }
+    }
+    
+    def _extract_with_rules_ticket(self, ocr_text: str, template_type: str, custom_fields: str = None) -> Dict[str, Any]:
+        """基于规则的票据字段抽取"""
+        fields = {}
 
-        validation_result: Dict[str, Any] = {}
-        anomaly_flags: List[Dict[str, Any]] = []
+        # 获取基础模板
+        template = self.TICKET_TEMPLATES.get(template_type, {}).copy()
 
-        if ocr_text is None:
-            response_meta["errors"] = {
-                "code": "INVALID_INPUT",
-                "message": "ocr_text is required",
-            }
-            return response_meta, anomaly_flags
+        # 处理自定义模板
+        if template_type == "custom" and custom_fields:
+            try:
+                custom_template = json.loads(custom_fields)
+                template.update(custom_template)
+            except json.JSONDecodeError:
+                # 如果JSON解析失败，返回空字段（错误已在上级方法中处理）
+                return fields
 
-        if len(ocr_text) > MAX_OCR_CHARS:
-            response_meta["errors"] = {
-                "code": "PAYLOAD_TOO_LARGE",
-                "message": f"ocr_text exceeds max allowed chars ({MAX_OCR_CHARS})",
-                "details": {"max_chars": MAX_OCR_CHARS, "received_chars": len(ocr_text)},
-            }
-            return response_meta, anomaly_flags
+        for field_name, field_config in template.items():
+            patterns = field_config.get("patterns", [])
 
-        # === 逻辑分支 ===
-        try:
-            if check_type == "duplicate":
-                # 重复检查（模拟）
-                validation_result["is_duplicate"] = False
-                validation_result["confidence"] = round(0.95, 4)
-                response_meta["model_version"] = "rule-based-v0.1"
+            for pattern in patterns:
+                matches = re.finditer(pattern, ocr_text, re.IGNORECASE | re.MULTILINE)
+                for match in matches:
+                    # 获取捕获组的值，如果没有捕获组则使用整个匹配
+                    if len(match.groups()) > 0:
+                        value = match.group(1)
+                    else:
+                        value = match.group(0)
 
-            elif check_type == "authenticity":
-                # 真伪检查
-                validation_result["is_authentic"] = True
-                response_meta["model_version"] = "rule-based-v0.1"
+                    # 记录原文锚定信息
+                    if field_name not in fields:
+                        fields[field_name] = {
+                            "value": value,
+                            "confidence": 0.8,  # 规则匹配的默认置信度
+                            "evidence": {
+                                "start": match.start(),
+                                "end": match.end(),
+                                "text": match.group(0),
+                                "method": "rule"
+                            },
+                            "extraction_info": {
+                                "method": "rule",
+                                "pattern": pattern,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                        }
+                        break  # 只取第一个匹配
 
-                # 检查必要元素，结构化 anomaly flags
-                if "发票号" not in ocr_text:
-                    anomaly_flags.append({"code": "MISSING_INVOICE_NO", "message": "缺少发票号", "provenance": {"snippet": None}})
-                if "税号" not in ocr_text:
-                    anomaly_flags.append({"code": "MISSING_TAX_ID", "message": "缺少税号", "provenance": {"snippet": None}})
+        return fields
 
-            elif check_type == "anomaly":
-                # 异常检测
-                response_meta["model_version"] = "rule-based-v0.1"
-                if "作废" in ocr_text:
-                    anomaly_flags.append({"code": "VOIDED", "message": "发票已作废", "provenance": {"snippet": "作废"}})
-                if "过期" in ocr_text:
-                    anomaly_flags.append({"code": "EXPIRED", "message": "发票已过期", "provenance": {"snippet": "过期"}})
+    def extract_ticket_facts(self, ocr_text: str, template_type: str, custom_fields: str = None,
+                           extraction_method: str = "hybrid", confidence_threshold: float = 0.7,
+                           model: str = None, provider: str = None, api_key: str = None, base_url: str = None):
+        """
+        图像票据事实结构化引擎 - 从OCR文本中抽取结构化票据字段
 
-            # 额外汇总信息
-            validation_result.setdefault("text_length", len(ocr_text))
+        Args:
+            ocr_text: OCR识别的票据文本
+            template_type: 模板类型 (invoice/receipt/contract/custom)
+            custom_fields: 自定义字段模板 (JSON格式)
+            extraction_method: 抽取方法 (hybrid/llm/rule)
+            confidence_threshold: 置信度阈值
 
-        except Exception as e:
-            # 异常时返回错误契约，保持 response meta 存在
-            response_meta["errors"] = {"code": "INTERNAL_ERROR", "message": str(e)}
-            return response_meta, anomaly_flags
+        Returns:
+            structured_fields: 结构化字段字典
+            extraction_metadata: 抽取元数据列表
+        """
+        # 初始化输出结构
+        structured_fields: Dict[str, Any] = {}
+        extraction_metadata: List[Dict[str, Any]] = []
 
-        # 最终封装返回（向后兼容：旧代码期望第一个返回值是 dict）
-        response_meta["validation_result"] = validation_result
-        # 如果没有结构化 anomaly flags，保持 [] 以便下游统一处理
-        return response_meta, anomaly_flags
+        # 输入验证
+        if not ocr_text or not ocr_text.strip():
+            extraction_metadata.append({
+                "type": "error",
+                "message": "ocr_text is required and cannot be empty",
+                "timestamp": datetime.now().isoformat()
+            })
+            return structured_fields, extraction_metadata
+
+        if len(ocr_text) > 200000:
+            extraction_metadata.append({
+                "type": "error",
+                "message": "ocr_text exceeds maximum length (200000 characters)",
+                "timestamp": datetime.now().isoformat()
+            })
+            return structured_fields, extraction_metadata
+
+        # 处理自定义字段模板
+        if template_type == "custom" and custom_fields:
+            try:
+                custom_template = json.loads(custom_fields)
+                self.TICKET_TEMPLATES["custom"] = custom_template
+            except json.JSONDecodeError:
+                extraction_metadata.append({
+                    "type": "error",
+                    "message": "自定义字段模板JSON格式错误",
+                    "timestamp": datetime.now().isoformat()
+                })
+
+        # 执行抽取
+        rule_fields = {}
+        llm_fields = {}
+
+        # 规则抽取
+        if extraction_method in ["rule", "hybrid"]:
+            rule_fields = self._extract_with_rules_ticket(ocr_text, template_type, custom_fields)
+
+        # LLM抽取 (简化版，实际应该调用LLM)
+        if extraction_method in ["llm", "hybrid"] and has_llm_config(provider):
+            # 这里应该调用LLM，但为了简化，我们暂时只返回规则结果
+            # llm_fields = self._extract_with_llm_ticket(ocr_text, template_type, model, provider, api_key, base_url)
+            pass
+
+        # 合并结果 (这里简化，只返回规则结果)
+        structured_fields = rule_fields
+
+        # 应用置信度阈值
+        for field_name, field_data in structured_fields.items():
+            if field_data and isinstance(field_data, dict):
+                confidence = field_data.get("confidence", 0)
+                if confidence < confidence_threshold:
+                    field_data["needs_human_review"] = True
+                    field_data["review_reason"] = f"置信度 {confidence:.2f} 低于阈值 {confidence_threshold}"
+
+        # 生成抽取元数据
+        extraction_metadata.append({
+            "extraction_method": extraction_method,
+            "template_type": template_type,
+            "total_fields_attempted": len(self.TICKET_TEMPLATES.get(template_type, {})),
+            "fields_extracted": len([f for f in structured_fields.values() if f is not None]),
+            "low_confidence_fields": len([f for f in structured_fields.values()
+                                        if f and f.get("needs_human_review")]),
+            "timestamp": datetime.now().isoformat(),
+            "text_length": len(ocr_text),
+            "text_hash": hashlib.sha256(ocr_text.encode()).hexdigest()[:16]
+        })
+
+        return structured_fields, extraction_metadata
 
 
 class AnalysisReasoningAI(BaseNode):
@@ -537,7 +706,7 @@ class AnalysisReasoningAI(BaseNode):
         "metrics": {"type": "DICT", "required": True},
         "text_analysis": {"type": "DICT", "required": False},
         "image_analysis": {"type": "DICT", "required": False},
-    }
+        }
     
     RETURN_TYPES = ("DICT", "STRING", "LIST")
     RETURN_NAMES = ("risk_assessment", "risk_level", "suggestions")
@@ -728,7 +897,7 @@ class HumanReviewNode(BaseNode):
     - 入站：create_review_task（被ExportReportNode等调用）
     - 出站：commit_review_decision（人工调用）
     """
-
+    
     NODE_TYPE = "HumanReviewNode"
     VERSION = "2.0.0"
     CATEGORY = "审计决策"
