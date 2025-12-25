@@ -16,6 +16,14 @@ from datetime import datetime
 
 from .base_node import BaseNode, ExecutionContext, NodeMetadata, FailurePolicy
 from app.core.config import settings
+from app.core.database import SessionLocal
+from app.core.database import DB_PATH
+import sqlite3
+from app.schemas.audit_result import AuditResult, RiskItem, EvidenceAnchor, Signatory, DocumentMeta
+from pathlib import Path
+import hashlib
+import json as _json
+import os
 
 class QuickPlotNode(BaseNode):
     """
@@ -31,21 +39,22 @@ class QuickPlotNode(BaseNode):
     
     @classmethod
     def INPUT_TYPES(cls):
+        # flat mapping expected by BaseNode.validate_inputs
         return {
-            "required": {
-                "dataframe": ("DATAFRAME",),
-                "chart_type": (["line", "bar", "pie", "scatter", "area"],),
-                "x_column": ("STRING", {"default": ""}),
-                "y_column": ("STRING", {"default": ""}),
-            },
-            "optional": {
-                "title": ("STRING", {"default": "Chart"}),
-                "legend_show": ("BOOLEAN", {"default": True}),
-            }
+            "dataframe": {"type": "DATAFRAME", "required": True},
+            "chart_type": {"type": "STRING", "required": True},
+            "x_column": {"type": "STRING", "required": True},
+            "y_column": {"type": "STRING", "required": True},
+            "title": {"type": "STRING", "required": False},
+            "legend_show": {"type": "BOOLEAN", "required": False},
+            "include_metadata": {"type": "BOOLEAN", "required": False},
+            "persist_sample": {"type": "BOOLEAN", "required": False},
+            "sample_strategy": {"type": "STRING", "required": False},
+            "sample_seed": {"type": "INT", "required": False},
         }
     
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("echarts_option",)
+    RETURN_TYPES = ("STRING", "JSON")
+    RETURN_NAMES = ("echarts_option", "qp_metadata")
     FUNCTION = "generate_chart"
     CATEGORY = "visualization"
     
@@ -60,6 +69,7 @@ class QuickPlotNode(BaseNode):
         y_column: str,
         title: str = "Chart",
         legend_show: bool = True
+        , include_metadata: bool = True, persist_sample: bool = False, sample_strategy: str = "systematic", sample_seed: int = 42
     ) -> Tuple[str]:
         """
         Generate ECharts configuration JSON from DataFrame.
@@ -93,10 +103,10 @@ class QuickPlotNode(BaseNode):
                     self._validate_numeric_column(dataframe, x_column, chart_type)
             
             # Sample large datasets for performance
-            df_sampled = self._sample_dataframe(dataframe)
+            df_sampled, sample_indices = self._sample_dataframe(dataframe, sample_strategy, sample_seed)
             if len(df_sampled) < len(dataframe):
                 title += f" (Sampled {len(df_sampled)}/{len(dataframe)} points)"
-            
+
             # Generate chart based on type (use sampled data)
             if chart_type == "pie":
                 option = self._generate_pie_chart(df_sampled, x_column, y_column, title, legend_show)
@@ -106,11 +116,29 @@ class QuickPlotNode(BaseNode):
                 option = self._generate_area_chart(df_sampled, x_column, y_column, title, legend_show)
             else:  # line or bar
                 option = self._generate_basic_chart(df_sampled, chart_type, x_column, y_column, title, legend_show)
-            
+
             # Convert to JSON string
-            option_json = json.dumps(option, ensure_ascii=False, indent=2)
-            
-            return (option_json,)
+            # attach metadata if requested
+            metadata = {}
+            # always attach metadata (include_metadata flag kept for backward compatible UI control)
+            metadata = {
+                "sample_count": len(df_sampled),
+                "total_count": len(dataframe),
+                "sample_indices": sample_indices
+            }
+            # persist sample rows if requested
+            if persist_sample:
+                try:
+                    sample_path = self._persist_sample_rows(df_sampled, sample_indices)
+                    metadata["sample_path"] = sample_path
+                except Exception:
+                    metadata["sample_path"] = None
+            option["_metadata"] = metadata
+            # wrap option and metadata at top-level to ensure metadata is discoverable
+            full = {"option": option, "_metadata": metadata}
+            option_json = json.dumps(full, ensure_ascii=False, indent=2)
+
+            return (option_json, metadata)
             
         except Exception as e:
             # Return error message in chart format
@@ -134,13 +162,95 @@ class QuickPlotNode(BaseNode):
         Sample large datasets for better performance.
         Uses systematic sampling to maintain distribution.
         """
-        if len(df) <= self.MAX_DATA_POINTS:
-            return df
-        
-        # Systematic sampling
-        step = len(df) // self.MAX_DATA_POINTS
-        return df.iloc[::step].reset_index(drop=True)
+        # compatibility wrapper: default to systematic
+        return self._sample_dataframe_with_strategy(df, "systematic", 42)
+
+    def _sample_dataframe_with_strategy(self, df: pd.DataFrame, strategy: str, seed: int = 42) -> Tuple[pd.DataFrame, List[int]]:
+        n = len(df)
+        if n <= self.MAX_DATA_POINTS:
+            return df, list(df.index)
+
+        if strategy == "reservoir":
+            # reservoir sampling
+            import random
+            random.seed(seed)
+            reservoir = []
+            it = enumerate(df.itertuples(index=True))
+            for i, row in it:
+                if len(reservoir) < self.MAX_DATA_POINTS:
+                    reservoir.append(i)
+                else:
+                    j = random.randint(0, i)
+                    if j < self.MAX_DATA_POINTS:
+                        reservoir[j] = i
+            reservoir_sorted = sorted(reservoir)
+            return df.loc[reservoir_sorted].reset_index(drop=True), reservoir_sorted
+        else:
+            # systematic sampling
+            step = max(1, n // self.MAX_DATA_POINTS)
+            indices = list(range(0, n, step))[:self.MAX_DATA_POINTS]
+            return df.iloc[indices].reset_index(drop=True), indices
+
+    def _sample_dataframe(self, df: pd.DataFrame, strategy: str = "systematic", seed: int = 42) -> Tuple[pd.DataFrame, List[int]]:
+        return self._sample_dataframe_with_strategy(df, strategy, seed)
+
+    def _persist_sample_rows(self, df_sampled: pd.DataFrame, indices: List[int]) -> Optional[str]:
+        """
+        Persist selected sample rows atomically to storage and return path.
+        df_sampled: the sampled dataframe (already subset)
+        indices: original indices for reference
+        """
+        storage_root = getattr(settings, "STORAGE_PATH", "./storage")
+        sample_dir = Path(storage_root) / "samples"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        # generate filename by hash of indices + timestamp
+        key = ",".join(map(str, indices))
+        fname = hashlib.sha1(key.encode()).hexdigest()[:12] + ".json"
+        final_path = sample_dir / fname
+        try:
+            tmp = sample_dir / f".{fname}.tmp"
+            # Convert sampled dataframe to JSON-safe records
+            payload = []
+            for _, row in df_sampled.iterrows():
+                row_dict = {}
+                for col in df_sampled.columns:
+                    value = row[col]
+                    if pd.isna(value):
+                        row_dict[col] = None
+                    elif pd.api.types.is_datetime64_any_dtype(df_sampled[col]):
+                        row_dict[col] = value.isoformat()
+                    else:
+                        row_dict[col] = value
+                payload.append(row_dict)
+
+            with open(tmp, "w", encoding="utf-8") as f:
+                _json.dump({"sample_indices": indices, "rows": payload}, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(str(tmp), str(final_path))
+            return str(final_path)
+        except Exception:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+            return None
     
+    def _serialize_for_json(self, series: pd.Series) -> list:
+        """
+        Convert pandas Series to JSON-serializable list, handling datetime and other types.
+        """
+        if pd.api.types.is_datetime64_any_dtype(series):
+            # Convert datetime to ISO string format
+            return [dt.isoformat() if pd.notna(dt) else None for dt in series]
+        elif pd.api.types.is_numeric_dtype(series):
+            # Numeric types can be converted directly
+            return series.tolist()
+        else:
+            # For other types (string, object), convert to string
+            return [str(val) if pd.notna(val) else None for val in series]
+
     def _validate_numeric_column(self, df: pd.DataFrame, col: str, chart_type: str) -> None:
         """
         Validate that numeric columns contain valid numbers for charting.
@@ -170,9 +280,9 @@ class QuickPlotNode(BaseNode):
         legend_show: bool
     ) -> dict:
         """Generate line or bar chart configuration."""
-        # Extract data
-        x_data = df[x_col].tolist()
-        y_data = df[y_col].tolist()
+        # Extract data with JSON serialization support
+        x_data = self._serialize_for_json(df[x_col])
+        y_data = self._serialize_for_json(df[y_col])
         
         option = {
             "title": {
@@ -235,10 +345,12 @@ class QuickPlotNode(BaseNode):
         legend_show: bool
     ) -> dict:
         """Generate pie chart configuration."""
-        # Prepare data in [{name: x, value: y}] format
+        # Prepare data in [{name: x, value: y}] format with JSON serialization
+        name_data = self._serialize_for_json(df[name_col])
+        value_data = self._serialize_for_json(df[value_col])
         data = [
             {"name": str(name), "value": float(value)}
-            for name, value in zip(df[name_col], df[value_col])
+            for name, value in zip(name_data, value_data)
         ]
         
         option = {
@@ -281,8 +393,11 @@ class QuickPlotNode(BaseNode):
         legend_show: bool
     ) -> dict:
         """Generate scatter plot configuration."""
-        # Prepare data in [[x, y]] format
-        data = [[float(x), float(y)] for x, y in zip(df[x_col], df[y_col])]
+        # Prepare data in [[x, y]] format with JSON serialization
+        x_data = self._serialize_for_json(df[x_col])
+        y_data = self._serialize_for_json(df[y_col])
+        data = [[float(x) if x is not None else 0, float(y) if y is not None else 0]
+                for x, y in zip(x_data, y_data)]
         
         option = {
             "title": {
@@ -450,44 +565,167 @@ class ResultGenerationNode(BaseNode):
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {
-                "risk_items": ("DATAFRAME",),
-                "risk_assessment": ("DICT",)
-            },
-            "optional": {
-                "suggestions": ("LIST",)
-            }
+            "risk_items": {"type": "DATAFRAME", "required": False},  # legacy support - not required
+            "risk_assessment": {"type": "DICT", "required": False},  # legacy support - not required
+            "findings": {"type": "LIST", "required": False},  # legacy support
+            "workflow_id": {"type": "STRING", "required": False},  # legacy support
+            "run_id": {"type": "STRING", "required": False},  # legacy support
+            "suggestions": {"type": "LIST", "required": False}
         }
     
     RETURN_TYPES = ("DICT",)
     RETURN_NAMES = ("audit_result",)
     FUNCTION = "generate_result"
     
+    def _execute_pure(self, inputs: Dict[str, Any], context: ExecutionContext) -> Dict[str, Any]:
+        """
+        Pure function implementation for generating audit results
+        """
+        risk_items = inputs.get("risk_items") or inputs.get("findings")  # support both legacy and new input names
+
+        # Convert findings list to DataFrame if needed
+        if isinstance(risk_items, list):
+            risk_items = pd.DataFrame(risk_items)
+
+        risk_assessment = inputs.get("risk_assessment", {})
+        suggestions = inputs.get("suggestions")
+
+        # Merge workflow_id and run_id from inputs into risk_assessment if not present
+        if "workflow_id" in inputs and "workflow_id" not in risk_assessment:
+            risk_assessment["workflow_id"] = inputs["workflow_id"]
+        if "run_id" in inputs and "run_id" not in risk_assessment:
+            risk_assessment["run_id"] = inputs["run_id"]
+
+        # Call generate_result and return as dict
+        result_dict = self.generate_result(risk_items, risk_assessment, suggestions)
+        if isinstance(result_dict, dict) and "audit_result" in result_dict and "file_path" in result_dict:
+            return result_dict
+        else:
+            # Legacy compatibility: if generate_result returns tuple, convert to dict
+            return {"audit_result": result_dict[0], "file_path": result_dict[1]}
+
     def generate_result(self, risk_items: pd.DataFrame, risk_assessment: Dict, suggestions: List = None):
-        """生成结构化审计结果"""
-        
-        # 统计分析
-        high_risk_count = 0
-        medium_risk_count = 0
-        
-        if not risk_items.empty and "risk_level" in risk_items.columns:
-            high_risk_count = len(risk_items[risk_items["risk_level"] == "HIGH"])
-            medium_risk_count = len(risk_items[risk_items["risk_level"] == "MEDIUM"])
-        
-        audit_result = {
-            "summary": {
-                "total_items": len(risk_items),
-                "high_risk_count": high_risk_count,
-                "medium_risk_count": medium_risk_count,
-                "overall_risk_level": risk_assessment.get("risk_level", "UNKNOWN")
+        """生成结构化审计结果（AuditResult），并将版本化结果写入 storage"""
+        workflow_id = risk_assessment.get("workflow_id") if isinstance(risk_assessment, dict) else None
+        run_id = risk_assessment.get("run_id") if isinstance(risk_assessment, dict) else None
+
+        # Convert risk_items rows to RiskItem models (best-effort)
+        findings: List[RiskItem] = []
+        if risk_items is not None and not getattr(risk_items, "empty", True):
+            for idx, row in risk_items.reset_index(drop=True).iterrows():
+                evid = []
+                # support evidence anchors in row if present
+                if "evidence" in row and isinstance(row["evidence"], dict):
+                    # try to normalize
+                    ev = row["evidence"]
+                    if isinstance(ev, list):
+                        for e in ev:
+                            evid.append(EvidenceAnchor(**e) if isinstance(e, dict) else EvidenceAnchor(evidence_id=str(e), source_node="unknown"))
+                    elif isinstance(ev, dict):
+                        # single anchor
+                        evid.append(EvidenceAnchor(**ev) if "evidence_id" in ev else EvidenceAnchor(evidence_id=str(idx), source_node="unknown", description=str(ev)))
+                ri = RiskItem(
+                    item_id = f"RISK-{idx+1}",
+                    rule_id = row.get("rule_id") if "rule_id" in row else None,
+                    description = row.get("description") if "description" in row else str(row.to_dict()),
+                    subject = row.get("subject") if "subject" in row else None,
+                    amount = float(row.get("amount")) if "amount" in row and row.get("amount") is not None else None,
+                    risk_level = row.get("risk_level") if "risk_level" in row else None,
+                    evidence = evid,
+                    ai_explanation = row.get("ai_explanation") if "ai_explanation" in row else None,
+                    human_review = row.get("human_review") or row.get("human_review_status") if "human_review" in row or "human_review_status" in row else None
+                )
+                findings.append(ri)
+
+        # Build AuditResult
+        # simple version id: v1-<timestamp>-<hash of findings>
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        # Normalize findings to dicts for stable hashing
+        normalized_findings = [f.dict() if hasattr(f, "dict") else f for f in findings]
+        hash_source = _json.dumps(normalized_findings, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        short_hash = hashlib.sha1(hash_source).hexdigest()[:8]
+        version = f"v1-{ts}-{short_hash}"
+        result_id = f"{workflow_id or 'wf'}_{run_id or 'run'}_{version}"
+
+        # Build audit_result as plain dict for compatibility with tests and downstream consumers
+        audit_result_dict: Dict[str, Any] = {
+            "result_id": result_id,
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+            "version": version,
+            "prepared_by": None,
+            "reviewed_by": None,
+            "approved_by": None,
+            "signature_required": True,
+            "signature_status": "draft",
+            "legal_basis": risk_assessment.get("legal_basis") if isinstance(risk_assessment, dict) else [],
+            "policy_version": risk_assessment.get("policy_version") if isinstance(risk_assessment, dict) else None,
+            "jurisdiction": risk_assessment.get("jurisdiction") if isinstance(risk_assessment, dict) else None,
+            "overall_opinion": None,
+            "key_findings": [f.dict() if hasattr(f, "dict") else f for f in findings],
+            "adjustments": [],
+            "management_response": None,
+            "document_meta": {
+                "title": risk_assessment.get("report_title") if isinstance(risk_assessment, dict) else "审计报告",
+                "report_type": risk_assessment.get("report_type") if isinstance(risk_assessment, dict) else "audit",
+                "client_name": risk_assessment.get("client_name") if isinstance(risk_assessment, dict) else None,
+                "period_start": risk_assessment.get("period_start") if isinstance(risk_assessment, dict) else None,
+                "period_end": risk_assessment.get("period_end") if isinstance(risk_assessment, dict) else None,
+                "issue_date": datetime.utcnow().isoformat(),
+                "confidentiality_level": risk_assessment.get("confidentiality_level") if isinstance(risk_assessment, dict) else "internal",
+                "version": version,
+                "hash": short_hash
             },
-            "findings": risk_items.to_dict('records') if not risk_items.empty else [],
-            "risk_assessment": risk_assessment,
-            "recommendations": suggestions or ["无特别建议"],
-            "generation_time": datetime.now().isoformat()
+            "evidence_trace": {},
+            "metadata": {"generated_by": "ResultGenerationNode", "suggestions": suggestions or []},
+            "immutable_hash": short_hash
         }
-        
-        return (audit_result,)
+
+        # Add basic summary for compatibility
+        try:
+            high_count = 0
+            for f in normalized_findings:
+                if isinstance(f, dict) and f.get("risk_level") == "HIGH":
+                    high_count += 1
+            audit_result_dict["summary"] = {
+                "total_items": len(normalized_findings),
+                "high_risk_count": high_count,
+                "overall_risk_level": "HIGH" if high_count > 0 else "LOW"
+            }
+        except Exception:
+            audit_result_dict["summary"] = {"total_items": len(normalized_findings)}
+
+        # Populate governance flags if any finding used experimental logic
+        governance_flags = {}
+        for f in findings:
+            try:
+                if isinstance(f, dict):
+                    hr = f.get("human_review_status", {}) or {}
+                else:
+                    hr = getattr(f, "human_review", {}) or getattr(f, "human_review_status", {}) or {}
+                if isinstance(hr, dict) and hr.get("experimental_logic_used"):
+                    governance_flags["experimental_logic_used"] = True
+                    break
+            except Exception:
+                continue
+        audit_result_dict["governance_flags"] = governance_flags
+
+        # Persist to storage: settings.STORAGE_PATH/results/{workflow_id}/{run_id}/{version}.json
+        base_dir = Path(settings.STORAGE_PATH) / "results" / (workflow_id or "unknown_workflow") / (run_id or "unknown_run")
+        os.makedirs(str(base_dir), exist_ok=True)
+        file_path = base_dir / f"{version}.json"
+
+        # remediation: ensure audit result contains model_info and disclaimers
+        try:
+            from app.core.ai_remediation import remediate_audit_result
+            ar_dict = remediate_audit_result(audit_result_dict)
+        except Exception:
+            ar_dict = audit_result_dict
+        with open(str(file_path), "w", encoding="utf-8") as f:
+            f.write(_json.dumps(ar_dict, ensure_ascii=False, indent=2))
+
+        # Return as dict for downstream nodes (include file_path for consumers)
+        return {"audit_result": audit_result_dict, "file_path": str(file_path)}
 
 
 class ReportGenerationNode(BaseNode):
@@ -766,12 +1004,23 @@ class ExportReportResultNode(BaseNode):
         import json
         from datetime import datetime
         
-        # 解析文件名模板
+        # Determine deterministic filename using audit_result metadata if available
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        date_str = datetime.now().strftime("%Y%m%d")
-        time_str = datetime.now().strftime("%H%M%S")
-        
-        final_file_name = file_name_template.replace("{timestamp}", timestamp).replace("{date}", date_str).replace("{time}", time_str)
+        version = ""
+        rid = None
+        try:
+            rid = audit_result.get("result_id")
+        except Exception:
+            rid = None
+        version = audit_result.get("document_meta", {}).get("version") if isinstance(audit_result.get("document_meta"), dict) else None
+        if rid:
+            final_file_name = f"{rid}"
+            if version:
+                final_file_name = f"{final_file_name}_{version}"
+        else:
+            date_str = datetime.now().strftime("%Y%m%d")
+            time_str = datetime.now().strftime("%H%M%S")
+            final_file_name = file_name_template.replace("{timestamp}", timestamp).replace("{date}", date_str).replace("{time}", time_str)
         
         # 确定保存路径
         if save_path:
@@ -836,85 +1085,82 @@ class ExportReportResultNode(BaseNode):
         
         return (result,)
     
-    def export_report(self, audit_result: Dict, export_format: str):
-        """导出审计报告"""
-        import os
-        import json
-        from datetime import datetime
-        
-        # 确保导出目录存在（统一使用 STORAGE_PATH/output/reports）
-        export_dir = os.path.join(settings.STORAGE_PATH, "output", "reports")
-        os.makedirs(export_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        if export_format == "excel":
-            # 导出为Excel
-            file_name = f"audit_report_{timestamp}.xlsx"
+def _export_report_impl(self, audit_result: Dict, export_format: str):
+    """Simplified export implementation with AI governance checks"""
+    import os
+    import json
+    from datetime import datetime
+
+    # AI governance check
+    from app.core import ai_gov
+    gov_res = ai_gov.check(audit_result)
+
+    # If hard violations -> block issuance
+    if gov_res.get("violations", {}).get("hard", 0) > 0 or gov_res.get("status") == "FAILED_HARD":
+        # Try audit log
+        try:
+            # Try to write audit log if possible
+            from app.core.audit_service import AuditService
+            db = SessionLocal()
+            try:
+                AuditService.log(db, action_type="AI_GOVERNANCE_BLOCK", target_type="audit_result", target_id=audit_result.get("result_id"), parameters={"ai_gov": gov_res})
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            # If audit logging fails, just continue
+            pass
+
+        # Return blocked status
+        status_obj = {"error_type": "AI_GOVERNANCE_BLOCK", "ai_scan_artifact": gov_res.get("report_ref"), "violations_summary": gov_res.get("violations")}
+        return None, json.dumps(status_obj, ensure_ascii=False)
+
+    export_dir = os.path.join(settings.STORAGE_PATH, "output", "reports")
+    os.makedirs(export_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    rid = audit_result.get("result_id") if isinstance(audit_result, dict) else None
+    version = None
+    if isinstance(audit_result.get("document_meta"), dict):
+        version = audit_result["document_meta"].get("version")
+    base_name = (rid + (f"_{version}" if version else "")) if rid else f"audit_report_{timestamp}"
+
+    if export_format == "json":
+        file_name = f"{base_name}.json"
+        file_path = os.path.join(export_dir, file_name)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(audit_result, f, ensure_ascii=False, indent=2)
+        status = "JSON report generated"
+    elif export_format == "excel":
+        try:
+            import pandas as _pd
+            file_name = f"{base_name}.xlsx"
             file_path = os.path.join(export_dir, file_name)
-            
-            with pd.ExcelWriter(file_path) as writer:
-                # 摘要sheet
-                summary_df = pd.DataFrame([audit_result.get("summary", {})])
-                summary_df.to_excel(writer, sheet_name="摘要", index=False)
-                
-                # 发现sheet
-                if audit_result.get("findings"):
-                    findings_df = pd.DataFrame(audit_result["findings"])
-                    findings_df.to_excel(writer, sheet_name="审计发现", index=False)
-                
-                # 建议sheet
-                if audit_result.get("recommendations"):
-                    rec_df = pd.DataFrame({"\u5efa\u8bae": audit_result["recommendations"]})
-                    rec_df.to_excel(writer, sheet_name="审计建议", index=False)
-            
-            status = f"Excel报告已生成"
-            
-        elif export_format == "json":
-            # 导出为JSON
-            file_name = f"audit_report_{timestamp}.json"
-            file_path = os.path.join(export_dir, file_name)
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(audit_result, f, ensure_ascii=False, indent=2)
-            
-            status = f"JSON报告已生成"
-            
-        elif export_format == "html":
-            # 导出为HTML
-            file_name = f"audit_report_{timestamp}.html"
-            file_path = os.path.join(export_dir, file_name)
-            
-            # 生成简单的HTML报告
-            html_content = f"""
-            <html>
-            <head>
-                <title>审计报告 - {timestamp}</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                    h1 {{ color: #333; }}
-                    table {{ border-collapse: collapse; width: 100%; }}
-                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                    th {{ background-color: #f2f2f2; }}
-                </style>
-            </head>
-            <body>
-                <h1>审计报告</h1>
-                <h2>摘要</h2>
-                <p>总项目数: {audit_result['summary']['total_items']}</p>
-                <p>高风险: {audit_result['summary']['high_risk_count']}</p>
-                <p>中风险: {audit_result['summary']['medium_risk_count']}</p>
-                <p>总体风险级别: {audit_result['summary']['overall_risk_level']}</p>
-            </body>
-            </html>
-            """
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            
-            status = f"HTML报告已生成"
-        
-        return file_path, status
+            with _pd.ExcelWriter(file_path) as writer:
+                summary_df = _pd.DataFrame([audit_result.get("summary", {})])
+                summary_df.to_excel(writer, sheet_name="summary", index=False)
+                findings = audit_result.get("findings", [])
+                if isinstance(findings, list) and findings:
+                    findings_df = _pd.DataFrame(findings)
+                    findings_df.to_excel(writer, sheet_name="findings", index=False)
+            status = "Excel report generated"
+        except Exception:
+            file_path = None
+            status = "Failed to generate Excel report"
+    else:
+        file_name = f"{base_name}.html"
+        file_path = os.path.join(export_dir, file_name)
+        html_content = f"<html><body><pre>{json.dumps(audit_result, ensure_ascii=False, indent=2)}</pre></body></html>"
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        status = "HTML report generated"
+    return file_path, status
+
+# Backwards-compatible: ensure ExportReportNode instances have an export_report method
+try:
+    ExportReportNode.export_report = _export_report_impl
+except Exception:
+    pass
 
 
 NODE_CLASS_MAPPINGS = {
