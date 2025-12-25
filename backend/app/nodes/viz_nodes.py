@@ -51,6 +51,7 @@ class QuickPlotNode(BaseNode):
             "persist_sample": {"type": "BOOLEAN", "required": False},
             "sample_strategy": {"type": "STRING", "required": False},
             "sample_seed": {"type": "INT", "required": False},
+            "stratify_column": {"type": "STRING", "required": False},
         }
     
     RETURN_TYPES = ("STRING", "JSON")
@@ -68,9 +69,13 @@ class QuickPlotNode(BaseNode):
         x_column: str,
         y_column: str,
         title: str = "Chart",
-        legend_show: bool = True
-        , include_metadata: bool = True, persist_sample: bool = False, sample_strategy: str = "systematic", sample_seed: int = 42
-    ) -> Tuple[str]:
+        legend_show: bool = True,
+        include_metadata: bool = True,
+        persist_sample: bool = False,
+        sample_strategy: str = "systematic",
+        sample_seed: int = 42,
+        stratify_column: str = None
+    ) -> Tuple[str, Dict[str, Any]]:
         """
         Generate ECharts configuration JSON from DataFrame.
         
@@ -103,7 +108,7 @@ class QuickPlotNode(BaseNode):
                     self._validate_numeric_column(dataframe, x_column, chart_type)
             
             # Sample large datasets for performance
-            df_sampled, sample_indices = self._sample_dataframe(dataframe, sample_strategy, sample_seed)
+            df_sampled, sample_indices = self._sample_dataframe(dataframe, sample_strategy, sample_seed, stratify_column)
             if len(df_sampled) < len(dataframe):
                 title += f" (Sampled {len(df_sampled)}/{len(dataframe)} points)"
 
@@ -124,7 +129,9 @@ class QuickPlotNode(BaseNode):
             metadata = {
                 "sample_count": len(df_sampled),
                 "total_count": len(dataframe),
-                "sample_indices": sample_indices
+                "sample_indices": sample_indices,
+                "sample_strategy": sample_strategy,
+                "stratify_column": stratify_column if sample_strategy == "stratified" else None
             }
             # persist sample rows if requested
             if persist_sample:
@@ -165,7 +172,7 @@ class QuickPlotNode(BaseNode):
         # compatibility wrapper: default to systematic
         return self._sample_dataframe_with_strategy(df, "systematic", 42)
 
-    def _sample_dataframe_with_strategy(self, df: pd.DataFrame, strategy: str, seed: int = 42) -> Tuple[pd.DataFrame, List[int]]:
+    def _sample_dataframe_with_strategy(self, df: pd.DataFrame, strategy: str, seed: int = 42, stratify_column: str = None) -> Tuple[pd.DataFrame, List[int]]:
         n = len(df)
         if n <= self.MAX_DATA_POINTS:
             return df, list(df.index)
@@ -185,14 +192,72 @@ class QuickPlotNode(BaseNode):
                         reservoir[j] = i
             reservoir_sorted = sorted(reservoir)
             return df.loc[reservoir_sorted].reset_index(drop=True), reservoir_sorted
+        elif strategy == "stratified":
+            # stratified sampling - requires stratify_column
+            if not stratify_column or stratify_column not in df.columns:
+                # fallback to systematic if no valid stratify column
+                step = max(1, n // self.MAX_DATA_POINTS)
+                indices = list(range(0, n, step))[:self.MAX_DATA_POINTS]
+                return df.iloc[indices].reset_index(drop=True), indices
+
+            # perform stratified sampling
+            return self._stratified_sample(df, stratify_column, self.MAX_DATA_POINTS, seed)
         else:
-            # systematic sampling
+            # systematic sampling (default)
             step = max(1, n // self.MAX_DATA_POINTS)
             indices = list(range(0, n, step))[:self.MAX_DATA_POINTS]
             return df.iloc[indices].reset_index(drop=True), indices
 
-    def _sample_dataframe(self, df: pd.DataFrame, strategy: str = "systematic", seed: int = 42) -> Tuple[pd.DataFrame, List[int]]:
-        return self._sample_dataframe_with_strategy(df, strategy, seed)
+    def _stratified_sample(self, df: pd.DataFrame, stratify_column: str, sample_size: int, seed: int = 42) -> Tuple[pd.DataFrame, List[int]]:
+        """
+        Perform stratified sampling based on the specified column.
+        Maintains the proportion of each stratum in the sample.
+        """
+        import random
+        random.seed(seed)
+
+        # Group by stratify column
+        groups = df.groupby(stratify_column)
+
+        # Calculate sample size for each stratum (proportional allocation)
+        total_rows = len(df)
+        stratum_sizes = groups.size()
+        stratum_sample_sizes = {}
+
+        remaining_samples = sample_size
+        for stratum, size in stratum_sizes.items():
+            # Proportional allocation with minimum of 1
+            stratum_sample = max(1, int(sample_size * size / total_rows))
+            # Don't exceed remaining samples or stratum size
+            stratum_sample = min(stratum_sample, remaining_samples, size)
+            stratum_sample_sizes[stratum] = stratum_sample
+            remaining_samples -= stratum_sample
+
+            if remaining_samples <= 0:
+                break
+
+        # Sample from each stratum
+        sampled_indices = []
+        for stratum, sample_size_needed in stratum_sample_sizes.items():
+            stratum_indices = groups.groups[stratum]
+            stratum_df = df.loc[stratum_indices]
+
+            if len(stratum_df) <= sample_size_needed:
+                # Take all rows if stratum is smaller than required sample
+                sampled_indices.extend(stratum_indices.tolist())
+            else:
+                # Random sample from stratum
+                sampled_from_stratum = random.sample(stratum_indices.tolist(), sample_size_needed)
+                sampled_indices.extend(sampled_from_stratum)
+
+        # Sort indices for consistency
+        sampled_indices.sort()
+
+        # Return sampled dataframe and indices
+        return df.loc[sampled_indices].reset_index(drop=True), sampled_indices
+
+    def _sample_dataframe(self, df: pd.DataFrame, strategy: str = "systematic", seed: int = 42, stratify_column: str = None) -> Tuple[pd.DataFrame, List[int]]:
+        return self._sample_dataframe_with_strategy(df, strategy, seed, stratify_column)
 
     def _persist_sample_rows(self, df_sampled: pd.DataFrame, indices: List[int]) -> Optional[str]:
         """
