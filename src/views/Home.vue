@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import NodeEditor from '@/components/NodeEditor.vue'
+import NodeEditorV2 from '@/components/editor/NodeEditorV2.vue'
 </script>
 
 <template>
-  <NodeEditor />
+  <NodeEditorV2 />
 </template>
 
 <style>
