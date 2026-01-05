@@ -1,5 +1,60 @@
 import { test, expect } from '@playwright/test';
 
+test('smoke: login -> drag node -> connect -> save -> load', async ({ page }) => {
+  // Adjust baseURL via PW_BASE_URL or use default
+  await page.goto('/');
+
+  // Login (adjust selectors if your login UI differs)
+  await page.fill('input[name="username"]', 'admin');
+  await page.fill('input[name="password"]', '0000');
+  await page.click('button[type="submit"]');
+
+  // Wait for V2 editor to appear
+  await page.waitForSelector('.node-editor-v2 .canvas-container', { timeout: 10000 });
+
+  // Drag an Input node from the node library to canvas
+  const libItem = page.locator('.node-library .node-item[data-type="Input"]').first();
+  const canvas = page.locator('.node-editor-v2 .canvas-container');
+
+  await libItem.waitFor({ state: 'visible', timeout: 5000 });
+  await libItem.dragTo(canvas);
+
+  // Assert node appears
+  const nodeA = page.locator('.canvas-node[data-type="Input"]').first();
+  await expect(nodeA).toHaveCount(1);
+
+  // Create a second node and connect
+  const libItem2 = page.locator('.node-library .node-item[data-type="Process"]').first();
+  await libItem2.dragTo(canvas);
+  const nodeB = page.locator('.canvas-node[data-type="Process"]').first();
+  await expect(nodeB).toHaveCount(1);
+
+  // Create connection: click output socket of nodeA then input socket of nodeB
+  await nodeA.locator('.socket.output').click();
+  await nodeB.locator('.socket.input').click();
+
+  // Assert connection exists
+  await expect(page.locator('.canvas-connection')).toHaveCount(1);
+
+  // Edit property of nodeA via properties panel
+  await nodeA.click(); // select
+  const titleInput = page.locator('.properties-panel input[name="title"]');
+  await titleInput.fill('Test Input Node');
+  await titleInput.press('Enter');
+
+  // Save workflow
+  await page.click('button[title="暂存到浏览器缓存"]');
+  await expect(page.locator('text=工作流已保存')).toBeVisible();
+
+  // Reload and validate persistence
+  await page.reload();
+  await page.waitForSelector('.node-editor-v2 .canvas-container');
+  await expect(page.locator('.canvas-node[data-type="Input"]')).toHaveCount(1);
+  await expect(page.locator('.canvas-connection')).toHaveCount(1);
+});
+
+import { test, expect } from '@playwright/test';
+
 test.describe('Editor E2E Tests', () => {
   test.setTimeout(60000); // 60 seconds timeout
 
@@ -91,59 +146,5 @@ test.describe('Editor E2E Tests', () => {
     await expect(page.locator('.viewport-controls')).toBeVisible();
 
     console.log('✅ Basic canvas interaction test passed');
-  });
-
-  test('NodeEditorV2: login -> drag node -> connect -> save -> load', async ({ page }) => {
-    await page.goto('http://localhost:5173'); // or preview url
-    // perform login if required
-    await page.fill('input[name="username"]', 'admin');
-    await page.fill('input[name="password"]', '0000');
-    await page.click('button[type="submit"]');
-
-    // wait for NodeEditorV2
-    await page.waitForSelector('.node-editor-v2 .editor-canvas');
-
-    // drag node from library to canvas
-    const src = page.locator('.node-library-panel .node-item').first();
-    const canvas = page.locator('.node-editor-v2 .editor-canvas');
-    await src.dragTo(canvas);
-
-    // assert node presence (adapt selector based on actual DOM)
-    await expect(page.locator('.canvas-node, [data-type]')).toHaveCount(1);
-
-    // create second node and connect (DOM dependent; adapt selectors)
-    const src2 = page.locator('.node-library-panel .node-item').nth(1);
-    await src2.dragTo(canvas);
-    // simulate connection: click output of first, click input of second
-    await page.click('.canvas-node .socket.output, .node-socket-output');
-    await page.click('.canvas-node .socket.input, .node-socket-input');
-
-    // save workflow
-    await page.click('button[title*="保存"], button[title*="暂存"]');
-    await expect(page.locator('text=工作流已保存, text=Workflow saved')).toBeVisible();
-
-    // reload and assert
-    await page.reload();
-    await expect(page.locator('.canvas-node, [data-type]')).toHaveCount(2);
-    await expect(page.locator('.canvas-connection, .connection')).toHaveCount(1);
-  });
-
-  test('NodeEditorV2 basic canvas interaction', async ({ page }) => {
-    // Navigate and login
-    await page.goto('http://localhost:5173/login');
-    await page.waitForSelector('input[placeholder*="username"]');
-
-    await page.fill('input[placeholder*="username"]', 'admin');
-    await page.fill('input[placeholder*="password"]', '0000');
-    await page.click('button:has-text("登录")');
-
-    await page.waitForURL('**/');
-
-    // Verify NodeEditorV2 elements are present
-    await expect(page.locator('.node-editor-v2')).toBeVisible();
-    await expect(page.locator('.editor-canvas')).toBeVisible();
-    await expect(page.locator('.node-library-panel')).toBeVisible();
-
-    console.log('✅ Basic NodeEditorV2 canvas interaction test passed');
   });
 });
